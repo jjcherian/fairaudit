@@ -75,12 +75,12 @@ class Metric:
 
     def get_conditional_groups(
         self,
-        groups : Groups,
+        group_dummies : np.ndarray,
         Z : np.ndarray = None,
         Y : np.ndarray = None
-    ) -> Union[Groups, List[Groups]]:
-        group_list = groups.definitions
-        group_dummies = groups.dummies
+    ) -> np.ndarray:
+        # group_list = groups.definitions
+        # group_dummies = groups.dummies
 
         if 'calibration_bins' in self.metric_params:
             Z_disc = np.digitize(
@@ -92,7 +92,7 @@ class Metric:
             z_dummies = np.zeros((Z.shape[0], len(z_vals)), dtype=int)
             z_dummies[(range(Z.shape[0]), z_indices)] = int(1)
 
-            group_list = [[dict(grp, Z=z_val) for grp in group_list] for z_val in z_vals]
+            # group_list = [[dict(grp, Z=z_val) for grp in group_list] for z_val in z_vals]
             group_dummies = np.einsum('ij,ik->kij', group_dummies, z_dummies)
 
         if 'y_values' in self.metric_params:
@@ -100,25 +100,19 @@ class Metric:
             y_dummies = np.isclose(Y, y_vals)
 
             if group_dummies.ndim > 2:
-                group_list = [
-                    [
-                        dict(grp, Y=y_val) for grp in g_list
-                    ]
-                    for g_list in group_list
-                    for y_val in y_vals
-                ]
+                # group_list = [
+                #     [
+                #         dict(grp, Y=y_val) for grp in g_list
+                #     ]
+                #     for g_list in group_list
+                #     for y_val in y_vals
+                # ]
                 group_dummies = np.concatenate(np.einsum('kij,il->klij', group_dummies, y_dummies), axis=0)
             else:
-                group_list = [[dict(grp, Y=y_val) for grp in group_list] for y_val in y_vals]
+                # group_list = [[dict(grp, Y=y_val) for grp in group_list] for y_val in y_vals]
                 group_dummies = np.einsum('ij,ik->kij', group_dummies, y_dummies)
 
-        if group_dummies.ndim > 2:
-            group_list = []
-            for g_list, g_dummies in zip(group_list, group_dummies):
-                group_list.append(Groups(g_list, g_dummies))
-            return group_list, group_dummies
-        else:
-            return groups
+        return group_dummies
 
 
 

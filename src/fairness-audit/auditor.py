@@ -6,7 +6,6 @@ from statsmodels.stats import multitest
 from typing import List, Tuple, Union
 
 from bootstrap import estimate_bootstrap_distribution, estimate_critical_value
-from groups import Groups
 from metrics import Metric
 
 
@@ -52,7 +51,7 @@ class Auditor:
         self,
         alpha : float,
         type : str,
-        groups : Union[Groups, str],
+        groups : Union[np.ndarray, str],
         epsilon : float = None,
         bootstrap_params : dict = None
     ) -> None:
@@ -69,32 +68,33 @@ class Auditor:
         """
         if isinstance(groups, str):
             groups_name = groups
-            groups = Groups([], np.ones((len(self.L), 1)))
+            group_dummies = np.ones((len(self.L), 1))
         else:
             groups_name = "exhaustive"
+            group_dummies = groups
 
         if self.metric.requires_conditioning():
             groups_list = self.metric.get_conditional_groups(
-                groups,
+                group_dummies,
                 self.Z,
                 self.Y
             )
             self.groups_list = groups_list
         else:
-            self.groups_list = [groups]
+            self.groups_list = [group_dummies]
 
         self.type = type
         self.epsilon = epsilon
 
-        for groups in groups_list:
-            all_dummies = np.amax(groups.dummies, axis=1)
+        for g_dummies in groups_list:
+            all_dummies = np.amax(g_dummies, axis=1)
             threshold = self.metric.compute_threshold(
                 self.Z[all_dummies], 
                 self.Y[all_dummies]
             )
             if groups_name != "exhaustive":
                 kwargs = {
-                    "X": self.X,
+                    "X": self.X[all_dummies],
                     "threshold": threshold,
                     "epsilon": epsilon,
                     "type": type
@@ -102,7 +102,7 @@ class Auditor:
                 c_value = estimate_critical_value(
                     groups_name,
                     alpha,
-                    self.L,
+                    self.L[all_dummies],
                     bootstrap_params,
                     **kwargs
                 )
@@ -112,7 +112,7 @@ class Auditor:
                     self.Z,
                     self.L,
                     threshold,
-                    groups,
+                    g_dummies,
                     self.metric,
                     epsilon,
                     bootstrap_params
@@ -132,10 +132,10 @@ class Auditor:
             raise ValueError("Run calibrate before querying for groups.")
 
         results = []
-        for groups, critical_value in zip(self.groups_list, self.critical_values):
-            dummies = groups.dummies[:,group]
+        for g_dummies, critical_value in zip(self.groups_list, self.critical_values):
+            dummies = g_dummies[:,group]
             metric_value = np.sum(self.L * dummies) / dummies.sum()
-            results.append(self._certify_group(metric_value, dummies, groups, critical_value))
+            results.append(self._certify_group(metric_value, dummies, g_dummies, critical_value))
 
         return results
 
@@ -146,7 +146,7 @@ class Auditor:
         kernel_params : dict = {},
         bootstrap_params : dict = {}
     ) -> None:
-        vacuous_group = Groups([], np.ones((self.X.shape[0], 1)))
+        vacuous_group = np.ones((self.X.shape[0], 1))
         if self.metric.requires_conditioning():
             self.groups_list = self.metric.get_conditional_groups(
                 vacuous_group,
@@ -156,14 +156,16 @@ class Auditor:
         else:
             self.groups_list = [vacuous_group]
         
+        self.kernel = kernel
+        self.kernel_params = kernel_params
         self.K = []
         self.critical_values = []
-        for group in self.groups_list:
+        for group_dummies in self.groups_list:
             K = pairwise_kernels(
-                X=self.X[group.dummies], 
+                X=self.X[group_dummies], 
                 metric=kernel, 
                 **kernel_params
-            ) + 1e-6 * np.eye(len(self.X))
+            ) + 1e-6 * np.eye(len(self.X[group_dummies]))
             self.K.append(K)
 
             K_sqrt = np.linalg.cholesky(K)
@@ -176,12 +178,20 @@ class Auditor:
         self,
         weights : np.ndarray,
     ) -> Tuple[List[float], List[float]]:
-
         lbs = []
         ubs = []
-        for K, crit_value, groups in zip(self.K, self.critical_values, self.groups_list):
-            h_plus = (K @ weights).clip(0)
-            Lh_plus = np.mean(self.L[groups.dummies] * h_plus)
+        for K, crit_value, group_dummies in zip(self.K, self.critical_values, self.groups_list):
+            if len(self.groups_list) > 1:
+                K_eval = pairwise_kernels(
+                    X=self.X[group_dummies],
+                    Y=self.X,
+                    metric=self.kernel
+                    **self.kernel_params
+                )
+                h_plus = (K_eval @ weights).clip(0) 
+            else:
+                h_plus = (K @ weights).clip(0)
+            Lh_plus = np.mean(self.L[group_dummies] * h_plus)
 
             # quadratic in epsilon
             a = np.mean(h_plus)**2
@@ -199,13 +209,13 @@ class Auditor:
     def _certify_group(
         self,
         metric_value : float,
+        dummies : np.ndarray,
         group_dummies : np.ndarray,
-        groups : Groups,
         critical_value : Union[float, Tuple[float, float]]
     ) -> Union[bool, float]:
-        all_dummies = np.amax(groups.dummies, axis=1)
+        all_dummies = np.amax(group_dummies, axis=1)
         threshold = self.metric.compute_threshold(self.Z[all_dummies], self.Y[all_dummies])
-        group_prob = np.sum(group_dummies) / len(group_dummies)
+        group_prob = np.sum(dummies) / len(dummies)
 
         if self.epsilon:
             if self.type == "lower":
@@ -228,7 +238,7 @@ class Auditor:
 
     def flag_groups(
         self,
-        groups : np.ndarray,
+        group_dummies : np.ndarray,
         type : str,
         alpha : float,
         epsilon : float = 0,
@@ -236,17 +246,17 @@ class Auditor:
     ) -> np.ndarray:
         if self.metric.requires_conditioning():
             groups_list = self.metric.get_conditional_groups(
-                groups,
+                group_dummies,
                 self.Z,
                 self.Y
             )
         else:
-            groups_list = [groups]
+            groups_list = [group_dummies]
 
-        n_groups = groups.dummies.shape[1]
+        n_groups = group_dummies.shape[1]
         all_p_values = np.ones((len(groups_list), n_groups))
-        for i, grps in enumerate(groups_list):
-            all_dummies = np.amax(grps.dummies, axis=1)
+        for i, g_dummies in enumerate(groups_list):
+            all_dummies = np.amax(g_dummies, axis=1)
             threshold = self.metric.compute_threshold(
                 self.Z[all_dummies], 
                 self.Y[all_dummies]
@@ -256,13 +266,13 @@ class Auditor:
                 self.Z,
                 self.L,
                 threshold,
-                grps,
+                g_dummies,
                 self.metric,
                 epsilon,
                 bootstrap_params
             )
 
-            metric_values = np.sum((self.L - threshold - epsilon) * grps.dummies) / grps.dummies.sum(axis=0)
+            metric_values = np.sum((self.L - threshold - epsilon) * g_dummies) / g_dummies.sum(axis=0)
 
             if type == "lower":
                 all_p_values[i,:] = 1 - norm.cdf(metric_values / s_grps)

@@ -1,27 +1,13 @@
 import numpy as np
 
 from itertools import combinations
-
-class Groups:
-    def __init__(
-        self, 
-        group_defs : list, 
-        group_dummies : np.ndarray
-    ):
-        self.definitions = group_defs
-        self.dummies = group_dummies
-    
-    def get_group_idx(
-        self,
-        group_dict : dict
-    ):
-        return self.definitions.index(group_dict)
+from typing import Tuple, Union
 
 def get_intersections(
     X : np.ndarray, 
     discretization : dict = {},
     depth : int = None
-) -> Groups:
+) -> np.ndarray:
     """
     Construct groups formed by intersections of other attributes.
     
@@ -43,16 +29,16 @@ def get_intersections(
     feature_list = np.arange(X.shape[1])
     if depth == None:
         depth = X.shape[1]
-    all_groups = []
+    # all_groups = []
     group_indices = []
     for n_intersect in range(1, depth + 1):
         for c in combinations(feature_list, n_intersect):
             unique_groups, indices = np.unique(X[:,c], return_inverse=True, axis=0)
 
             # track groups
-            all_groups.extend(
-                [{c_ind : g_val for c_ind, g_val in zip(c, g)} for g in unique_groups]
-            )
+            # all_groups.extend(
+            #     [{c_ind : g_val for c_ind, g_val in zip(c, g)} for g in unique_groups]
+            # )
 
             # generate dummies
             dummies = np.zeros((X.shape[0], len(unique_groups)), dtype=int)
@@ -61,19 +47,19 @@ def get_intersections(
     
     group_indices = np.concatenate(group_indices, axis=1, dtype=int)
 
-    return Groups(all_groups, group_indices)
+    return group_indices
 
 def get_rectangles(
     X : np.ndarray,
     discretization : dict = {}
-) -> Groups:
+) -> np.ndarray:
     """
     Construct rectangles formed by attributes.
 
     Parameters
     ----------
 
-    discretization : float 
+    discretization : dict 
         Discretize feature into chunks of relative size 
         determined by the discretization parameter, i.e.,
         [1,2,3,4,5] with discretization < .2 yields
@@ -122,7 +108,7 @@ def get_rectangles(
     group_dummies = np.einsum(einsum_str, *coordinate_dummies)
     group_dummies = group_dummies.reshape(n, -1, order='C') # flatten into (n, n_rectangles)
 
-    return Groups([], group_dummies)
+    return group_dummies
 
 def score_intervals(
     X : np.ndarray,
@@ -131,7 +117,7 @@ def score_intervals(
     epsilon : float,
     w : np.ndarray,
     type : str
-) -> float:
+) -> Union[float, Tuple[float, float]]:
     ind = X.argsort()
     X = X[ind]
     L = L[ind]
