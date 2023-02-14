@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.stats
 
-from groups import Groups, score_intervals
+from groups import score_intervals
 from shifts import score_rkhs
 from metrics import Metric
 
@@ -12,8 +12,8 @@ BOOTSTRAP_DEFAULTS = {
     "B": 500,
     "method": "multinomial",
     "student": None,
-    "student_threshold": "adaptive",
-    "seed": 0
+    "student_threshold": 0.05**(3/2),
+    "seed": 1
 }
 
 def _compute_bound_statistic(
@@ -25,12 +25,12 @@ def _compute_bound_statistic(
     group_dummies : np.ndarray,
     w : np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
-    Y_b = np.repeat(Y, w, axis=0)
-    Z_b = np.repeat(Z, w, axis=0)
+    Y_b = np.repeat(Y, w.flatten(), axis=0)
+    Z_b = np.repeat(Z, w.flatten(), axis=0)
     threshold_b = metric.compute_threshold(Z_b, Y_b)
 
-    L = L - threshold
-    L_b = w * (L - threshold_b)
+    L = (L - threshold).reshape(-1,1)
+    L_b = (w * (L - threshold_b)).reshape(-1,1)
 
     # form group statistics
     # (L, L_b, 1, w)
@@ -58,17 +58,17 @@ def _compute_fixed_statistic(
     w : np.ndarray,
     epsilon : float
 ) -> Tuple[np.ndarray, np.ndarray]:
-    Y_b = np.repeat(Y, w, axis=0)
-    Z_b = np.repeat(Z, w, axis=0)
+    Y_b = np.repeat(Y, w.flatten(), axis=0)
+    Z_b = np.repeat(Z, w.flatten(), axis=0)
     threshold_b = metric.compute_threshold(Z_b, Y_b)
 
-    L = L - threshold - epsilon
-    L_b = w * (L - threshold_b - epsilon)
+    L_n = (L - threshold - epsilon).reshape(-1,1)
+    L_b = (w.flatten() * (L - threshold_b - epsilon).flatten()).reshape(-1,1)
 
     # form group statistics
     # (L, L_b, 1)
     mat = np.concatenate(
-        (L, L_b, np.ones_like(w)),
+        (L_n, L_b, np.ones_like(w)),
         axis=1
     )
 
@@ -79,26 +79,29 @@ def _compute_fixed_statistic(
 
     stats = group_mat[:,1] - group_mat[:,0]
 
-    return stats.flatten(), group_mat
+    return stats, group_mat
 
 def estimate_bootstrap_distribution(
     Y : np.ndarray,
     Z : np.ndarray,
     L : np.ndarray,
     threshold : float,
-    groups : Groups,
+    group_dummies : np.ndarray,
     metric : Metric,
     epsilon : float = None,
     bootstrap_params : dict = {}
 ) -> np.ndarray:
     n = Y.shape[0]
-    n_groups = groups.dummies.shape[1]
+    n_groups = group_dummies.shape[1]
 
     B = bootstrap_params.get("B", BOOTSTRAP_DEFAULTS["B"])
     method = bootstrap_params.get("method", BOOTSTRAP_DEFAULTS["method"])
 
-    b_statistics = np.empty((B, n_groups))
-    group_statistics = np.empty((B, n_groups, 4))
+    b_statistics = np.zeros((B, n_groups))
+    if epsilon is None:
+        group_statistics = np.empty((B, n_groups, 4))
+    else:
+        group_statistics = np.empty((B, n_groups, 3))
     
     rng = np.random.default_rng(
         seed=bootstrap_params.get("seed", BOOTSTRAP_DEFAULTS["seed"])
@@ -117,7 +120,7 @@ def estimate_bootstrap_distribution(
                 L,
                 threshold,
                 metric,
-                groups.dummies,
+                group_dummies,
                 w
             )
         else:
@@ -127,7 +130,7 @@ def estimate_bootstrap_distribution(
                 L,
                 threshold,
                 metric,
-                groups.dummies,
+                group_dummies,
                 w, 
                 epsilon
             )
@@ -176,17 +179,17 @@ def estimate_critical_value(
     scores = []
     for b in tqdm(range(B)):
         if method == 'multinomial':
-            w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1,1)
+            w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1)
         elif method == 'gaussian':
             w = rng.standard_normal(size=n)
         else:
             raise ValueError("Invalid multiplier bootstrap method.")
         if function_class == "RKHS":
             score = score_rkhs(L, kwargs["K_sqrt"], w, seed=b)
-        elif function_class == "interval":
+        elif function_class == "intervals":
             score = score_intervals(
-                kwargs["X"], 
-                L, 
+                kwargs["X"].flatten(), 
+                L.flatten(), 
                 kwargs["threshold"], 
                 kwargs["epsilon"], 
                 w, 

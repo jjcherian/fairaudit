@@ -30,24 +30,19 @@ def get_intersections(
     if depth == None:
         depth = X.shape[1]
     # all_groups = []
-    group_indices = []
+    group_dummies = []
     for n_intersect in range(1, depth + 1):
         for c in combinations(feature_list, n_intersect):
             unique_groups, indices = np.unique(X[:,c], return_inverse=True, axis=0)
 
-            # track groups
-            # all_groups.extend(
-            #     [{c_ind : g_val for c_ind, g_val in zip(c, g)} for g in unique_groups]
-            # )
-
             # generate dummies
             dummies = np.zeros((X.shape[0], len(unique_groups)), dtype=int)
             dummies[(range(X.shape[0]), indices)] = int(1)
-            group_indices.append(dummies)
+            group_dummies.append(dummies)
     
-    group_indices = np.concatenate(group_indices, axis=1, dtype=int)
+    group_dummies = np.concatenate(group_dummies, axis=1, dtype=int)
 
-    return group_indices
+    return group_dummies.astype(bool)
 
 def get_rectangles(
     X : np.ndarray,
@@ -108,7 +103,12 @@ def get_rectangles(
     group_dummies = np.einsum(einsum_str, *coordinate_dummies)
     group_dummies = group_dummies.reshape(n, -1, order='C') # flatten into (n, n_rectangles)
 
-    return group_dummies
+    # filter out duplicate groups
+    group_dummies = np.unique(group_dummies, axis=1)
+    if np.all(group_dummies[:,0] == 0):
+        group_dummies = group_dummies[:,1:]
+
+    return group_dummies.astype(bool)
 
 def score_intervals(
     X : np.ndarray,
@@ -123,6 +123,7 @@ def score_intervals(
     L = L[ind]
     w = w[ind]
 
+    # TODO: wrong...should be using bootstrap threshold
     if type == "lower":
         arr = -1 * (w - 1) * (L - threshold - epsilon)
         score = _max_subarray(arr)
@@ -143,7 +144,7 @@ def score_intervals(
 def _max_subarray(numbers):
     best_sum = 0  # or: float('-inf')
     current_sum = 0
-    for x in numbers:
+    for i, x in enumerate(numbers):
         current_sum = max(0, current_sum + x)
         best_sum = max(best_sum, current_sum)
     return best_sum

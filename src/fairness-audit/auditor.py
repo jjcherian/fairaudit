@@ -24,7 +24,7 @@ class Auditor:
         ----------
         X : covariates (n, k)
         Y : outcomes (n, 1)
-        Z : predictions (n, 1)
+        Z : predictions (n, p)
         metric : Metric
         """
         assert X.shape[0] == Y.shape[0] == Z.shape[0]
@@ -53,7 +53,7 @@ class Auditor:
         type : str,
         groups : Union[np.ndarray, str],
         epsilon : float = None,
-        bootstrap_params : dict = None
+        bootstrap_params : dict = {}
     ) -> None:
         """
         Obtain bootstrap critical values for a specific group collection
@@ -67,8 +67,10 @@ class Auditor:
         bootstrap_params : dict = None
         """
         if isinstance(groups, str):
+            if epsilon == None:
+                raise ValueError(f"Only fixed-epsilon certification supported with {groups}.")
             groups_name = groups
-            group_dummies = np.ones((len(self.L), 1))
+            group_dummies = np.ones((len(self.L), 1), dtype=bool)
         else:
             groups_name = "exhaustive"
             group_dummies = groups
@@ -85,8 +87,9 @@ class Auditor:
 
         self.type = type
         self.epsilon = epsilon
+        self.critical_values = []
 
-        for g_dummies in groups_list:
+        for g_dummies in self.groups_list:
             all_dummies = np.amax(g_dummies, axis=1)
             threshold = self.metric.compute_threshold(
                 self.Z[all_dummies], 
@@ -126,18 +129,24 @@ class Auditor:
 
     def query_group(
         self,
-        group : int
+        group : Union[np.ndarray, int]
     ) -> Tuple[float, bool]:
         if self.critical_values is None:
             raise ValueError("Run calibrate before querying for groups.")
 
         results = []
+        metric_values = []
         for g_dummies, critical_value in zip(self.groups_list, self.critical_values):
-            dummies = g_dummies[:,group]
+            if isinstance(group, int):
+                dummies = g_dummies[:,group]
+            else:
+                all_dummies = np.amax(g_dummies, axis=1)
+                dummies = group * all_dummies
             metric_value = np.sum(self.L * dummies) / dummies.sum()
+            metric_values.append(metric_value)
             results.append(self._certify_group(metric_value, dummies, g_dummies, critical_value))
 
-        return results
+        return results, metric_values
 
     def calibrate_rkhs(
         self,
@@ -146,7 +155,7 @@ class Auditor:
         kernel_params : dict = {},
         bootstrap_params : dict = {}
     ) -> None:
-        vacuous_group = np.ones((self.X.shape[0], 1))
+        vacuous_group = np.ones((len(self.L), 1), dtype=bool)
         if self.metric.requires_conditioning():
             self.groups_list = self.metric.get_conditional_groups(
                 vacuous_group,
@@ -171,7 +180,7 @@ class Auditor:
             K_sqrt = np.linalg.cholesky(K)
 
             self.critical_values.append(
-                estimate_critical_value("RKHS", alpha, bootstrap_params, dict(K_sqrt=K_sqrt))
+                estimate_critical_value("RKHS", alpha, self.L[group_dummies], bootstrap_params, dict(K_sqrt=K_sqrt))
             )
 
     def query_rkhs(
@@ -215,9 +224,9 @@ class Auditor:
     ) -> Union[bool, float]:
         all_dummies = np.amax(group_dummies, axis=1)
         threshold = self.metric.compute_threshold(self.Z[all_dummies], self.Y[all_dummies])
-        group_prob = np.sum(dummies) / len(dummies)
+        group_prob = np.mean(dummies)
 
-        if self.epsilon:
+        if self.epsilon != None:
             if self.type == "lower":
                 return metric_value < threshold + self.epsilon + critical_value / group_prob
             elif self.type == "upper":
