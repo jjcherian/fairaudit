@@ -38,14 +38,16 @@ class Auditor:
 
         # filled in by calibrate_groups(...)
         self.epsilon = None
-        self.type = None
 
         # filled in by calibrate_rkhs(...)
         self.K = None
+        self.student_threshold = None
 
         # filled in by either calibrate function
         self.critical_values = None
         self.groups_list = None
+        self.students = []
+        self.type = None
 
     def calibrate_groups(
         self,
@@ -56,7 +58,7 @@ class Auditor:
         bootstrap_params : dict = {}
     ) -> None:
         """
-        Obtain bootstrap critical values for a specific group collection
+        Obtain bootstrap critical values for a specific group collection.
 
         Parameters
         ----------
@@ -88,6 +90,7 @@ class Auditor:
         self.type = type
         self.epsilon = epsilon
         self.critical_values = []
+        self.students = []
 
         for g_dummies in self.groups_list:
             all_dummies = np.amax(g_dummies, axis=1)
@@ -109,8 +112,9 @@ class Auditor:
                     bootstrap_params,
                     **kwargs
                 )
+                students = np.asarray([1])
             else:
-                b_statistics, _ = estimate_bootstrap_distribution(
+                b_statistics, students = estimate_bootstrap_distribution(
                     self.Y,
                     self.Z,
                     self.L,
@@ -125,32 +129,54 @@ class Auditor:
                     alpha,
                     type
                 )
+                # print("critical value upper", c_value)
             self.critical_values.append(c_value)
+            self.students.append(students)
 
     def query_group(
         self,
         group : Union[np.ndarray, int]
     ) -> Tuple[float, bool]:
+        """
+        Query calibrated auditor for certificate for a particular group
+        
+        Parameters
+        ----------
+        group : Union[np.ndarray, int]
+
+        Returns
+        -------
+        certificate : Tuple[List[Union[float, bool]], List[float]]
+        """
         if self.critical_values is None:
             raise ValueError("Run calibrate before querying for groups.")
 
         results = []
         metric_values = []
-        for g_dummies, critical_value in zip(self.groups_list, self.critical_values):
+        for g_dummies, critical_value, student in zip(self.groups_list, self.critical_values, self.students):
             if isinstance(group, int):
                 dummies = g_dummies[:,group]
-            else:
+                student_value = student[group]
+            else: 
                 all_dummies = np.amax(g_dummies, axis=1)
-                dummies = group * all_dummies
+                dummies = group.flatten() * all_dummies
+
+                ind = np.all(dummies[:,None] == g_dummies, axis=0)
+                if ind.any(): # if there were any matches to existing groups find corresponding student
+                    student_value = student[ind]
+                else: # don't studentize if no matches found...
+                    student_value = student.max()
             metric_value = np.sum(self.L * dummies) / dummies.sum()
             metric_values.append(metric_value)
-            results.append(self._certify_group(metric_value, dummies, g_dummies, critical_value))
+            # print(student, critical_value)
+            results.append(self._certify_group(metric_value, dummies, g_dummies, critical_value, student_value))
 
         return results, metric_values
 
     def calibrate_rkhs(
         self,
         alpha : float,
+        type : str,
         kernel : str,
         kernel_params : dict = {},
         bootstrap_params : dict = {}
@@ -169,26 +195,39 @@ class Auditor:
         self.kernel_params = kernel_params
         self.K = []
         self.critical_values = []
+        self.type = type
         for group_dummies in self.groups_list:
             K = pairwise_kernels(
-                X=self.X[group_dummies], 
+                X=self.X[group_dummies].reshape(-1,self.X.shape[1]), 
                 metric=kernel, 
                 **kernel_params
             ) + 1e-6 * np.eye(len(self.X[group_dummies]))
             self.K.append(K)
 
             K_sqrt = np.linalg.cholesky(K)
-
+            if bootstrap_params.get("student_threshold", None):
+                self.student_threshold = bootstrap_params["student_threshold"]
+                K_basis = _approximate_matrix(K_sqrt.T @ K_sqrt, perc=.9)
+                print(f"Low-rank approximation size: {K_basis.shape[1]}")
+            else:
+                self.student_threshold = 1
+                K_basis = None
             self.critical_values.append(
-                estimate_critical_value("RKHS", alpha, self.L[group_dummies], bootstrap_params, dict(K_sqrt=K_sqrt))
+                estimate_critical_value(
+                    "RKHS", 
+                    alpha, 
+                    self.L[group_dummies.flatten()], 
+                    bootstrap_params, 
+                    **dict(K_sqrt=K_sqrt, type=type, K_basis=K_basis)
+                )
             )
 
     def query_rkhs(
         self,
         weights : np.ndarray,
     ) -> Tuple[List[float], List[float]]:
-        lbs = []
-        ubs = []
+        bounds = []
+        vals = []
         for K, crit_value, group_dummies in zip(self.K, self.critical_values, self.groups_list):
             if len(self.groups_list) > 1:
                 K_eval = pairwise_kernels(
@@ -200,19 +239,18 @@ class Auditor:
                 h_plus = (K_eval @ weights).clip(0) 
             else:
                 h_plus = (K @ weights).clip(0)
-            Lh_plus = np.mean(self.L[group_dummies] * h_plus)
 
-            # quadratic in epsilon
-            a = np.mean(h_plus)**2
-            b = -2 * np.mean(h_plus) * Lh_plus
-            c = Lh_plus**2 - crit_value / (h_plus**2)
+            Lh_plus = np.mean(self.L[group_dummies.flatten()] * h_plus)
+            val = Lh_plus / np.mean(h_plus)
 
-            lb_gp = (-1 * b - np.sqrt(b**2 - 4 * a * c)) / (2*a)
-            ub_gp = (-1 * b + np.sqrt(b**2 - 4 * a * c)) / (2*a)
-            lbs.append(lb_gp)
-            ubs.append(ub_gp)
+            # self.student_threshold = 1 if there is no studenization
+            student_val = max(np.mean(h_plus) * np.sqrt(np.mean(h_plus**2)), self.student_threshold**(3/2)) 
+            bound = val - crit_value * student_val / (np.mean(h_plus)**2)
 
-        return lbs, ubs
+            bounds.append(bound)
+            vals.append(val)
+
+        return bounds, vals
 
 
     def _certify_group(
@@ -220,7 +258,8 @@ class Auditor:
         metric_value : float,
         dummies : np.ndarray,
         group_dummies : np.ndarray,
-        critical_value : Union[float, Tuple[float, float]]
+        critical_value : Union[float, Tuple[float, float]],
+        student_value : float
     ) -> Union[bool, float]:
         all_dummies = np.amax(group_dummies, axis=1)
         threshold = self.metric.compute_threshold(self.Z[all_dummies], self.Y[all_dummies])
@@ -228,21 +267,19 @@ class Auditor:
 
         if self.epsilon != None:
             if self.type == "lower":
-                return metric_value < threshold + self.epsilon + critical_value / group_prob
+                return metric_value < threshold + self.epsilon + student_value * critical_value / group_prob
             elif self.type == "upper":
-                return metric_value > threshold + self.epsilon + critical_value / group_prob
+                return metric_value > threshold + self.epsilon + student_value * critical_value / group_prob
             else:
-                bool_l = metric_value < threshold + self.epsilon + critical_value[0] / group_prob
-                bool_u = metric_value > threshold + self.epsilon + critical_value[1] / group_prob
+                bool_l = metric_value < threshold + self.epsilon + student_value * critical_value[0] / group_prob
+                bool_u = metric_value > threshold + self.epsilon + student_value * critical_value[1] / group_prob
                 return bool_l & bool_u
         else:
-            if self.type == "lower":
-                return metric_value - threshold - critical_value / group_prob**2
-            elif self.type == "upper":
-                return metric_value - threshold - critical_value / group_prob**2
+            if self.type == "lower" or self.type == "upper":
+                return metric_value - threshold - student_value * critical_value / group_prob**2
             else:
-                eps_l = metric_value - threshold - critical_value[0] / group_prob**2
-                eps_u = metric_value - threshold - critical_value[1] / group_prob**2
+                eps_l = metric_value - threshold - student_value * critical_value[0] / group_prob**2
+                eps_u = metric_value - threshold - student_value * critical_value[1] / group_prob**2
                 return max(eps_l, eps_u)
 
     def flag_groups(
@@ -251,7 +288,7 @@ class Auditor:
         type : str,
         alpha : float,
         epsilon : float = 0,
-        bootstrap_params : dict = None  
+        bootstrap_params : dict = {"student" : "mad", "student_threshold" : -np.inf}  
     ) -> np.ndarray:
         if self.metric.requires_conditioning():
             groups_list = self.metric.get_conditional_groups(
@@ -264,6 +301,7 @@ class Auditor:
 
         n_groups = group_dummies.shape[1]
         all_p_values = np.ones((len(groups_list), n_groups))
+        all_metric_values = np.zeros((len(groups_list), n_groups))
         for i, g_dummies in enumerate(groups_list):
             all_dummies = np.amax(g_dummies, axis=1)
             threshold = self.metric.compute_threshold(
@@ -281,19 +319,21 @@ class Auditor:
                 bootstrap_params
             )
 
-            metric_values = np.sum((self.L - threshold - epsilon) * g_dummies) / g_dummies.sum(axis=0)
+            test_statistics = np.sum((self.L - threshold - epsilon)[:,None] * g_dummies, axis=0) / np.sum(all_dummies)
+
+            all_metric_values[i,:] = np.sum((self.L - threshold)[:,None] * g_dummies, axis=0) / g_dummies.sum(axis=0)
 
             if type == "lower":
-                all_p_values[i,:] = 1 - norm.cdf(metric_values / s_grps)
+                all_p_values[i,:] = 1 - norm.cdf(test_statistics / s_grps)
             elif type == "upper":
-                all_p_values[i,:] = norm.cdf(metric_values / s_grps)
+                all_p_values[i,:] = norm.cdf(test_statistics / s_grps)
             else:
-                all_p_values[i,:] = 1 - 2 * norm.cdf(np.abs(metric_values) / s_grps)
+                all_p_values[i,:] = 1 - 2 * norm.cdf(np.abs(test_statistics) / s_grps)
 
         bh_rejections = multitest.multipletests(all_p_values.flatten(), alpha, method='fdr_bh')
         flags = np.amax(bh_rejections[0].reshape((-1, n_groups)), axis=0)
 
-        return flags
+        return flags, all_metric_values
 
 
 def _compute_critical_value(
@@ -315,3 +355,12 @@ def _compute_critical_value(
     return critical_values
 
 
+def _approximate_matrix(
+    mat : np.ndarray,
+    perc : float = 0.9
+):
+    w, v = np.linalg.eigh(mat)
+    v_exp = np.cumsum(w[::-1]) / np.sum(w)
+    start_idx = -1 - int(np.argmax(v_exp > perc))
+
+    return v[:,start_idx:]

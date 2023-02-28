@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 
 from itertools import combinations
@@ -60,6 +61,7 @@ def get_rectangles(
         [1,2,3,4,5] with discretization < .2 yields
         [1], [2], [3], [4], [5]
     """
+    X = copy.deepcopy(X)
     for idx, disc in discretization.items():
         X[:,idx] = np.digitize(
             X[:,idx],

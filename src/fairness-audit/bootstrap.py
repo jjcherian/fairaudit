@@ -2,7 +2,7 @@ import numpy as np
 import scipy.stats
 
 from groups import score_intervals
-from shifts import score_rkhs
+from shifts import score_rkhs, score_rkhs_nonneg
 from metrics import Metric
 
 from tqdm import tqdm
@@ -12,7 +12,7 @@ BOOTSTRAP_DEFAULTS = {
     "B": 500,
     "method": "multinomial",
     "student": None,
-    "student_threshold": 0.05**(3/2),
+    "student_threshold": None,
     "seed": 1
 }
 
@@ -32,21 +32,28 @@ def _compute_bound_statistic(
     L = (L - threshold).reshape(-1,1)
     L_b = (w * (L - threshold_b)).reshape(-1,1)
 
+    n = len(w)
+
     # form group statistics
     # (L, L_b, 1, w)
     mat = np.concatenate(
-        (L, L_b, np.ones_like(w), w),
+        (L / n, L_b / n, np.ones_like(w) / n, w / n),
         axis=1
     )
 
     # returns (sum_{i \in G} L/n, \sum_{i \in G} w_i * L_i / n, |G|/n, \sum_{i \in G} w_i / n)
     # for each group
     # resulting matrix is (n_groups, 4)
-    group_mat = (group_dummies.T @ mat) / len(w)
+    group_mat = (group_dummies.T @ mat)
 
     stats = group_mat[:,1] * group_mat[:,2] - group_mat[:,0] * group_mat[:,3]
 
-    return stats.flatten(), group_mat
+    # indmax = stats.argmax()
+    # if group_dummies[:,indmax].mean() <= 0.4:
+    #     import IPython
+    #     IPython.embed()
+
+    return stats.flatten(), group_mat[:,2]
 
 def _compute_fixed_statistic(
     Y : np.ndarray,
@@ -79,7 +86,7 @@ def _compute_fixed_statistic(
 
     stats = group_mat[:,1] - group_mat[:,0]
 
-    return stats, group_mat
+    return stats, group_mat[:,2]
 
 def estimate_bootstrap_distribution(
     Y : np.ndarray,
@@ -98,23 +105,20 @@ def estimate_bootstrap_distribution(
     method = bootstrap_params.get("method", BOOTSTRAP_DEFAULTS["method"])
 
     b_statistics = np.zeros((B, n_groups))
-    if epsilon is None:
-        group_statistics = np.empty((B, n_groups, 4))
-    else:
-        group_statistics = np.empty((B, n_groups, 3))
+    group_probs = np.zeros((n_groups,))
     
     rng = np.random.default_rng(
         seed=bootstrap_params.get("seed", BOOTSTRAP_DEFAULTS["seed"])
     )
-    for b in tqdm(range(B)):
+    for b in range(B): # removed TQDM for now... TODO
         if method == 'multinomial':
             w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1,1)
         elif method == 'gaussian':
-            w = rng.standard_normal(size=n)
+            w = rng.standard_normal(size=n).reshape(-1,1)
         else:
             raise ValueError("Invalid multiplier bootstrap method.")
         if epsilon is None:
-            b_statistics[b], group_statistics[b] = _compute_bound_statistic(
+            b_statistics[b], group_probs = _compute_bound_statistic(
                 Y,
                 Z,
                 L,
@@ -124,7 +128,7 @@ def estimate_bootstrap_distribution(
                 w
             )
         else:
-            b_statistics[b], group_statistics[b] = _compute_fixed_statistic(
+            b_statistics[b], group_probs = _compute_fixed_statistic(
                 Y,
                 Z,
                 L,
@@ -139,25 +143,24 @@ def estimate_bootstrap_distribution(
     studentization = bootstrap_params.get("student", BOOTSTRAP_DEFAULTS["student"])
     if studentization:
         student_threshold = bootstrap_params.get("student_threshold", BOOTSTRAP_DEFAULTS["student_threshold"])
-        std_devs = studentize(b_statistics, group_statistics, studentization, student_threshold)
+        std_devs = studentize(b_statistics, group_probs, studentization, student_threshold)
         b_statistics /= std_devs
 
     return b_statistics, std_devs
 
 def studentize(
     statistics : np.ndarray, 
-    group_statistics : np.ndarray,
+    group_probs : np.ndarray,
     student : str,
     student_threshold : float
 ) -> np.ndarray:
-    emp_probs = np.mean(group_statistics[:,:,2], axis=0)
     if student == "mad":
-        studentization = scipy.stats.median_absolute_deviation(statistics)
+        studentization = scipy.stats.median_abs_deviation(statistics)
         studentization *= 1/scipy.stats.norm.ppf(3/4)
     elif student == "iqr":
         studentization = scipy.stats.iqr(statistics)
     elif student == "prob_bound":
-        studentization = emp_probs**(3/2)
+        studentization = group_probs**(3/2)
     else:
         raise ValueError(f"Unsupported studentization method: {student}.")
     return studentization.clip(student_threshold)
@@ -177,7 +180,7 @@ def estimate_critical_value(
 
     n = len(L)
     scores = []
-    for b in tqdm(range(B)):
+    for _ in range(B): # removed tqdm for now
         if method == 'multinomial':
             w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1)
         elif method == 'gaussian':
@@ -185,7 +188,22 @@ def estimate_critical_value(
         else:
             raise ValueError("Invalid multiplier bootstrap method.")
         if function_class == "RKHS":
-            score = score_rkhs(L, kwargs["K_sqrt"], w, seed=b)
+            student_threshold = bootstrap_params.get("student_threshold", BOOTSTRAP_DEFAULTS["student_threshold"])
+            score = score_rkhs(
+                L, 
+                kwargs["K_sqrt"], 
+                w,
+                kwargs["type"],
+                student_threshold,
+                kwargs["K_basis"]
+            )
+        elif function_class == "RKHS_nonneg":
+            score = score_rkhs_nonneg(
+                L,
+                kwargs["K_sqrt"],
+                w,
+                kwargs["type"]
+            )
         elif function_class == "intervals":
             score = score_intervals(
                 kwargs["X"].flatten(), 
@@ -200,16 +218,15 @@ def estimate_critical_value(
         scores.append(score)
 
     if function_class == "RKHS":
-        qtile = np.quantile(scores, 1 - alpha/2)
+        alpha = alpha/2
+    if kwargs["type"] == "lower":
+        qtile = np.quantile(scores, alpha)
+    elif kwargs["type"] == "upper":
+        qtile = np.quantile(scores, 1 - alpha)
     else:
-        if kwargs["type"] == "lower":
-            qtile = np.quantile(scores, alpha)
-        elif kwargs["type"] == "upper":
-            qtile = np.quantile(scores, 1 - alpha)
-        else:
-            qtile_l = np.quantile(np.asarray(scores)[:,0], alpha/2)
-            qtile_u = np.quantile(np.asarray(scores)[:,1], 1 - alpha/2)
-            return qtile_l, qtile_u
+        qtile_l = np.quantile(np.asarray(scores)[:,0], alpha/2)
+        qtile_u = np.quantile(np.asarray(scores)[:,1], 1 - alpha/2)
+        return qtile_l, qtile_u
     return qtile
 
         
