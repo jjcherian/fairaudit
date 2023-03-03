@@ -114,22 +114,54 @@ class Auditor:
                 )
                 students = np.asarray([1])
             else:
-                b_statistics, students = estimate_bootstrap_distribution(
-                    self.Y,
-                    self.Z,
-                    self.L,
-                    threshold,
-                    g_dummies,
-                    self.metric,
-                    epsilon,
-                    bootstrap_params
-                )
-                c_value = _compute_critical_value(
-                    b_statistics,
-                    alpha,
-                    type
-                )
-                # print("critical value upper", c_value)
+                if type == "interval" and epsilon is not None:
+                    b_statistics_l, students = estimate_bootstrap_distribution(
+                        self.Y,
+                        self.Z,
+                        self.L,
+                        threshold,
+                        g_dummies,
+                        self.metric,
+                        epsilon,
+                        bootstrap_params
+                    )
+                    b_statistics_u, students = estimate_bootstrap_distribution(
+                        self.Y,
+                        self.Z,
+                        self.L,
+                        threshold,
+                        g_dummies,
+                        self.metric,
+                        -1 * epsilon,
+                        bootstrap_params
+                    )
+                    c_value_l = _compute_critical_value(
+                        b_statistics_l,
+                        alpha,
+                        "lower"
+                    )
+                    c_value_u = _compute_critical_value(
+                        b_statistics_u,
+                        alpha,
+                        "upper"
+                    )
+                    c_value = (c_value_l, c_value_u)
+                else:
+                    b_statistics, students = estimate_bootstrap_distribution(
+                        self.Y,
+                        self.Z,
+                        self.L,
+                        threshold,
+                        g_dummies,
+                        self.metric,
+                        epsilon,
+                        bootstrap_params
+                    )
+                    c_value = _compute_critical_value(
+                        b_statistics,
+                        alpha,
+                        type
+                    )
             self.critical_values.append(c_value)
             self.students.append(students)
 
@@ -153,6 +185,7 @@ class Auditor:
 
         results = []
         metric_values = []
+        thresholds = []
         for g_dummies, critical_value, student in zip(self.groups_list, self.critical_values, self.students):
             if isinstance(group, int):
                 dummies = g_dummies[:,group]
@@ -164,14 +197,73 @@ class Auditor:
                 ind = np.all(dummies[:,None] == g_dummies, axis=0)
                 if ind.any(): # if there were any matches to existing groups find corresponding student
                     student_value = student[ind]
+                    assert len(np.unique(student_value)) == 1
+                    student_value = student_value[0]
                 else: # don't studentize if no matches found...
                     student_value = student.max()
-            metric_value = np.sum(self.L * dummies) / dummies.sum()
-            metric_values.append(metric_value)
-            # print(student, critical_value)
-            results.append(self._certify_group(metric_value, dummies, g_dummies, critical_value, student_value))
+            if dummies.sum() == 0:
+                if self.type in ("lower", "upper"):
+                    if self.epsilon is None:
+                        results.append(np.nan)
+                    else:
+                        results.append(False)
+                else:
+                    if self.epsilon is None:
+                        results.append([np.nan, np.nan])
+                    else:
+                        results.append(False)
+                metric_values.append(np.nan)
+            else:
+                metric_value = np.sum(self.L * dummies) / dummies.sum()
+                
+                bounds, est, threshold = self._certify_group(metric_value, dummies, g_dummies, critical_value, student_value)
+                results.append(bounds)
+                metric_values.append(est)
+                thresholds.append(threshold)
 
-        return results, metric_values
+        return results, metric_values, thresholds
+    
+    def _certify_group(
+        self,
+        metric_value : float,
+        dummies : np.ndarray,
+        group_dummies : np.ndarray,
+        critical_value : Union[float, Tuple[float, float]],
+        student_value : float
+    ) -> Union[bool, float]:
+        all_dummies = np.amax(group_dummies, axis=1)
+        threshold = self.metric.compute_threshold(self.Z[all_dummies], self.Y[all_dummies])
+        group_prob = np.mean(dummies)
+
+        if self.epsilon != None:
+            if group_prob == 0:
+                return False, metric_value, threshold
+            if self.type == "lower":
+                cert = metric_value < threshold + self.epsilon + student_value * critical_value / group_prob
+                return cert, metric_value, threshold
+            elif self.type == "upper":
+                cert =  metric_value > threshold + self.epsilon + student_value * critical_value / group_prob
+                return cert, metric_value, threshold
+            else:
+                bool_l = metric_value < threshold + self.epsilon + student_value * critical_value[0] / group_prob
+                bool_u = metric_value > threshold - self.epsilon + student_value * critical_value[1] / group_prob
+                return bool_l & bool_u, metric_value, threshold
+        else:
+            if self.type == "lower" or self.type == "upper":
+                if group_prob == 0:
+                    if critical_value < 0:
+                        return np.inf, metric_value, threshold
+                    else:
+                        return -1 * np.inf, metric_value, threshold
+                eps = metric_value - threshold - student_value * critical_value / group_prob**2
+                return eps.item(), metric_value, threshold
+            else:
+                if group_prob == 0:
+                    return [-np.inf, np.inf], metric_value - threshold
+                
+                eps_l = metric_value - threshold - student_value * critical_value[0] / group_prob**2
+                eps_u = metric_value - threshold - student_value * critical_value[1] / group_prob**2
+                return [eps_u.item(), eps_l.item()], metric_value, threshold
 
     def calibrate_rkhs(
         self,
@@ -251,36 +343,6 @@ class Auditor:
             vals.append(val)
 
         return bounds, vals
-
-
-    def _certify_group(
-        self,
-        metric_value : float,
-        dummies : np.ndarray,
-        group_dummies : np.ndarray,
-        critical_value : Union[float, Tuple[float, float]],
-        student_value : float
-    ) -> Union[bool, float]:
-        all_dummies = np.amax(group_dummies, axis=1)
-        threshold = self.metric.compute_threshold(self.Z[all_dummies], self.Y[all_dummies])
-        group_prob = np.mean(dummies)
-
-        if self.epsilon != None:
-            if self.type == "lower":
-                return metric_value < threshold + self.epsilon + student_value * critical_value / group_prob
-            elif self.type == "upper":
-                return metric_value > threshold + self.epsilon + student_value * critical_value / group_prob
-            else:
-                bool_l = metric_value < threshold + self.epsilon + student_value * critical_value[0] / group_prob
-                bool_u = metric_value > threshold + self.epsilon + student_value * critical_value[1] / group_prob
-                return bool_l & bool_u
-        else:
-            if self.type == "lower" or self.type == "upper":
-                return metric_value - threshold - student_value * critical_value / group_prob**2
-            else:
-                eps_l = metric_value - threshold - student_value * critical_value[0] / group_prob**2
-                eps_u = metric_value - threshold - student_value * critical_value[1] / group_prob**2
-                return max(eps_l, eps_u)
 
     def flag_groups(
         self,

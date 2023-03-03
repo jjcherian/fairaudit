@@ -66,8 +66,9 @@ class Metric:
 
         self.metric_params = metric_params
 
-        if self.metric_name not in _METRICS:
+        if evaluation_function is not None:
             _METRICS[self.metric_name] = evaluation_function
+        if threshold_function is not None:
             _THRESHOLDS[self.metric_name] = threshold_function
     
     def evaluate(

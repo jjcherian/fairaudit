@@ -25,19 +25,22 @@ def _compute_bound_statistic(
     group_dummies : np.ndarray,
     w : np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray]:
-    Y_b = np.repeat(Y, w.flatten(), axis=0)
-    Z_b = np.repeat(Z, w.flatten(), axis=0)
+    all_dummies = np.amax(group_dummies, axis=1)
+
+    Y_b = np.repeat(Y[all_dummies], w.flatten()[all_dummies], axis=0)
+    Z_b = np.repeat(Z[all_dummies], w.flatten()[all_dummies], axis=0)
+    
     threshold_b = metric.compute_threshold(Z_b, Y_b)
 
-    L = (L - threshold).reshape(-1,1)
-    L_b = (w * (L - threshold_b)).reshape(-1,1)
+    L_n = (L - threshold).reshape(-1,1)
+    L_b = (w.flatten() * (L - threshold_b)).reshape(-1,1)
 
     n = len(w)
 
     # form group statistics
     # (L, L_b, 1, w)
     mat = np.concatenate(
-        (L / n, L_b / n, np.ones_like(w) / n, w / n),
+        (L_n / n, L_b / n, np.ones_like(w) / n, w / n),
         axis=1
     )
 
@@ -47,6 +50,7 @@ def _compute_bound_statistic(
     group_mat = (group_dummies.T @ mat)
 
     stats = group_mat[:,1] * group_mat[:,2] - group_mat[:,0] * group_mat[:,3]
+    # stats -= group_mat[:,2] * group_mat[:,3] * (threshold_b - threshold) # TODO: check if this is right
 
     # indmax = stats.argmax()
     # if group_dummies[:,indmax].mean() <= 0.4:
@@ -65,8 +69,11 @@ def _compute_fixed_statistic(
     w : np.ndarray,
     epsilon : float
 ) -> Tuple[np.ndarray, np.ndarray]:
-    Y_b = np.repeat(Y, w.flatten(), axis=0)
-    Z_b = np.repeat(Z, w.flatten(), axis=0)
+    all_dummies = np.amax(group_dummies, axis=1)
+
+    Y_b = np.repeat(Y[all_dummies], w.flatten()[all_dummies], axis=0)
+    Z_b = np.repeat(Z[all_dummies], w.flatten()[all_dummies], axis=0)
+    
     threshold_b = metric.compute_threshold(Z_b, Y_b)
 
     L_n = (L - threshold - epsilon).reshape(-1,1)
@@ -161,6 +168,8 @@ def studentize(
         studentization = scipy.stats.iqr(statistics)
     elif student == "prob_bound":
         studentization = group_probs**(3/2)
+    elif student == "prob_bool":
+        studentization = group_probs**(1/2)
     else:
         raise ValueError(f"Unsupported studentization method: {student}.")
     return studentization.clip(student_threshold)

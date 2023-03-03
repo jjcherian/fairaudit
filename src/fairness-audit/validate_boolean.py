@@ -54,13 +54,13 @@ def run_trial(size, seed, disc):
     fwer = np.all(coverages)
     return fwer
 
-def run_trial_boolean(size, seed, boot_params, z_star):
+def run_trial_boolean(size, seed, boot_params, eps):
     rng = np.random.default_rng(seed=seed)
 
-    x = rng.uniform(0, 5, size=size).reshape(-1,1)    
+    x = rng.uniform(-1, 1, size=size).reshape(-1,1)    
     y = rng.standard_normal(size=len(x))
-    z1 = -1 * z_star * np.ones_like(y).reshape(-1,1)
-    z2 = z_star * np.ones_like(y).reshape(-1,1)
+    z1 = -np.inf * np.ones_like(y).reshape(-1,1)
+    z2 = scipy.stats.norm.ppf(eps) * np.ones_like(y).reshape(-1,1)
     z = np.concatenate((z1, z2), axis=1)
     auditor = Auditor(
         X=x,
@@ -69,10 +69,10 @@ def run_trial_boolean(size, seed, boot_params, z_star):
         metric=Metric('equalized_coverage')
     )
 
-    eps = 1 - 2 * scipy.stats.norm.cdf(-1 * z_star)
+    # 1 - 2 * scipy.stats.norm.cdf(-1 * z_star)
 
     auditor.calibrate_groups(
-        alpha=0.05,
+        alpha=0.1,
         type='upper',
         groups="intervals",
         epsilon=eps,
@@ -132,7 +132,7 @@ def run_cqr_trial_boolean(audit_trail, boot_params, eps, oos_data, disc):
     intervals_at = get_rectangles(audit_trail['x'].to_numpy().reshape(-1,1), {0:np.arange(0,5,disc)})
 
     auditor.calibrate_groups(
-        alpha=0.05,
+        alpha=0.1,
         type='upper',
         groups=intervals_at,
         epsilon=eps,
@@ -155,32 +155,45 @@ def run_cqr_trial_boolean(audit_trail, boot_params, eps, oos_data, disc):
 
 audit_trail = pd.read_csv('../../oos_data.csv', index_col=0)
 
-eps_loose = 0.88
+eps_loose = 0.85
 eps = 0.9
- # 100 200 400 800 already done
-for sample_size in [1600, 3200]:
+
+fwer_exact = {}
+fwer_cqr_exact = {}
+fwer_cqr_loose = {}
+for sample_size in [100, 200, 400, 800, 1600]:
     fwers_bern = []
     fwers_bern_2 = []
     fwers_cqr = []
     fwers_cqr_2 = []
 
-    rng = np.random.default_rng(seed=1)
-    for i in tqdm(np.arange(0, 250)):
-        boot_params = {'seed': i, 'B': 2000, 'method': 'multinomial'}
+    rng = np.random.default_rng(seed=10)
+    for i in tqdm(np.arange(0, 1000)):
+        boot_params = {'seed': i, 'B': 500, 'method': 'multinomial'}
+        prob_threshold = (25 / sample_size)
 
-        fwer_sharp = run_trial_boolean(sample_size, i, boot_params, z_star=1)
-        fwers_bern.append(fwer_sharp)
+        boot_params = {'seed': i, 'B': 500, 'method': 'multinomial',
+                    'student': 'prob_bool', 'student_threshold': prob_threshold**(1/2)}
+        
+        # fwer_sharp = run_trial_boolean(sample_size, i, boot_params, eps=0.9)
+        # fwers_bern.append(fwer_sharp)
 
-        fwer_sharp_2 = run_trial_boolean(sample_size, i, boot_params, z_star=1.96)
-        fwers_bern_2.append(fwer_sharp_2)
+        # fwer_sharp_2 = run_trial_boolean(sample_size, i, boot_params, z_star=1.96)
+        # fwers_bern_2.append(fwer_sharp_2)
 
-        # audit_trail_sample = audit_trail.sample(n=sample_size, replace=True, random_state=rng)
+        audit_trail_sample = audit_trail.sample(n=sample_size, replace=True, random_state=rng)
 
-        # # validate semi-synthetic boolean certification
-        # fwer_cqr = run_cqr_trial_boolean(audit_trail_sample, boot_params, eps, audit_trail, disc=0.1)
-        # fwers_cqr.append(fwer_cqr)
+        # validate semi-synthetic boolean certification
+        fwer_cqr = run_cqr_trial_boolean(audit_trail_sample, boot_params, eps, audit_trail, disc=0.1)
+        fwers_cqr.append(fwer_cqr)
 
-        # fwer_cqr_loose = run_cqr_trial_boolean(audit_trail_sample, boot_params, eps_loose, audit_trail, disc=0.1)
-        # fwers_cqr_2.append(fwer_cqr_loose)
+        # fwer_cqr_2 = run_cqr_trial_boolean(audit_trail_sample, boot_params, eps_loose, audit_trail, disc=0.1)
+        # fwers_cqr_2.append(fwer_cqr_2)
+    
+    # fwer_exact[sample_size] = np.mean(fwers_bern)
+    # fwer_cqr_exact[sample_size] = np.mean(fwers_cqr)
+    fwer_cqr_loose[sample_size] = np.mean(fwers_cqr)
+    print(sample_size, np.mean(fwers_cqr), np.mean(fwers_cqr_2))
 
-    print(sample_size, np.mean(fwers_bern), np.mean(fwers_bern_2), np.mean(fwers_cqr), np.mean(fwers_cqr_2))
+with open('bernoulli_validation.pkl', 'wb') as fp:
+    pickle.dump((fwer_exact, fwer_cqr_exact, fwer_cqr_loose), fp)
