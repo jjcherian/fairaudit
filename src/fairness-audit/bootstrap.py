@@ -13,6 +13,7 @@ BOOTSTRAP_DEFAULTS = {
     "method": "multinomial",
     "student": None,
     "student_threshold": None,
+    "prob_threshold": 1e-10,
     "seed": 1
 }
 
@@ -150,7 +151,8 @@ def estimate_bootstrap_distribution(
     studentization = bootstrap_params.get("student", BOOTSTRAP_DEFAULTS["student"])
     if studentization:
         student_threshold = bootstrap_params.get("student_threshold", BOOTSTRAP_DEFAULTS["student_threshold"])
-        std_devs = studentize(b_statistics, group_probs, studentization, student_threshold)
+        prob_threshold = bootstrap_params.get("prob_threshold", BOOTSTRAP_DEFAULTS["prob_threshold"])
+        std_devs = studentize(b_statistics, group_probs, studentization, student_threshold, prob_threshold)
         b_statistics /= std_devs
 
     return b_statistics, std_devs
@@ -159,13 +161,16 @@ def studentize(
     statistics : np.ndarray, 
     group_probs : np.ndarray,
     student : str,
-    student_threshold : float
+    student_threshold : float,
+    prob_threshold : float = 1e-8
 ) -> np.ndarray:
     if student == "mad":
         studentization = scipy.stats.median_abs_deviation(statistics)
         studentization *= 1/scipy.stats.norm.ppf(3/4)
+        studentization[group_probs <= prob_threshold] = np.inf
     elif student == "iqr":
         studentization = scipy.stats.iqr(statistics)
+        studentization[group_probs <= prob_threshold] = np.inf
     elif student == "prob_bound":
         studentization = group_probs**(3/2)
     elif student == "prob_bool":
@@ -189,7 +194,7 @@ def estimate_critical_value(
 
     n = len(L)
     scores = []
-    for _ in range(B): # removed tqdm for now
+    for _ in tqdm(range(B)): # removed tqdm for now
         if method == 'multinomial':
             w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1)
         elif method == 'gaussian':

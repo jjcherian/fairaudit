@@ -58,7 +58,6 @@ def score_rkhs(
         opt = _qr_no_student(M, K_sqrt, basis, type)
     else:
         opt = _qr_student(M, K_sqrt, np.concatenate((basis, K_basis), axis=1), student_threshold, type)
-
     return opt
 
 def _qr_no_student(

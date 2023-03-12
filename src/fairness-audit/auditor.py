@@ -346,7 +346,7 @@ class Auditor:
 
     def flag_groups(
         self,
-        group_dummies : np.ndarray,
+        groups : np.ndarray,
         type : str,
         alpha : float,
         epsilon : float = 0,
@@ -354,14 +354,14 @@ class Auditor:
     ) -> np.ndarray:
         if self.metric.requires_conditioning():
             groups_list = self.metric.get_conditional_groups(
-                group_dummies,
+                groups,
                 self.Z,
                 self.Y
             )
         else:
-            groups_list = [group_dummies]
+            groups_list = [groups]
 
-        n_groups = group_dummies.shape[1]
+        n_groups = groups.shape[1]
         all_p_values = np.ones((len(groups_list), n_groups))
         all_metric_values = np.zeros((len(groups_list), n_groups))
         for i, g_dummies in enumerate(groups_list):
@@ -381,7 +381,8 @@ class Auditor:
                 bootstrap_params
             )
 
-            test_statistics = np.sum((self.L - threshold - epsilon)[:,None] * g_dummies, axis=0) / np.sum(all_dummies)
+            test_statistics = np.sum((self.L - threshold - epsilon)[:,None] * g_dummies, axis=0) 
+            test_statistics = test_statistics / np.sum(all_dummies)
 
             all_metric_values[i,:] = np.sum((self.L - threshold)[:,None] * g_dummies, axis=0) / g_dummies.sum(axis=0)
 
@@ -391,7 +392,6 @@ class Auditor:
                 all_p_values[i,:] = norm.cdf(test_statistics / s_grps)
             else:
                 all_p_values[i,:] = 1 - 2 * norm.cdf(np.abs(test_statistics) / s_grps)
-
         bh_rejections = multitest.multipletests(all_p_values.flatten(), alpha, method='fdr_bh')
         flags = np.amax(bh_rejections[0].reshape((-1, n_groups)), axis=0)
 
