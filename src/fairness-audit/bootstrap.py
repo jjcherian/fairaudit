@@ -51,12 +51,6 @@ def _compute_bound_statistic(
     group_mat = (group_dummies.T @ mat)
 
     stats = group_mat[:,1] * group_mat[:,2] - group_mat[:,0] * group_mat[:,3]
-    # stats -= group_mat[:,2] * group_mat[:,3] * (threshold_b - threshold) # TODO: check if this is right
-
-    # indmax = stats.argmax()
-    # if group_dummies[:,indmax].mean() <= 0.4:
-    #     import IPython
-    #     IPython.embed()
 
     return stats.flatten(), group_mat[:,2]
 
@@ -118,7 +112,7 @@ def estimate_bootstrap_distribution(
     rng = np.random.default_rng(
         seed=bootstrap_params.get("seed", BOOTSTRAP_DEFAULTS["seed"])
     )
-    for b in range(B): # removed TQDM for now... TODO
+    for b in tqdm(range(B)):
         if method == 'multinomial':
             w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1,1)
         elif method == 'gaussian':

@@ -168,7 +168,7 @@ class Auditor:
     def query_group(
         self,
         group : Union[np.ndarray, int]
-    ) -> Tuple[float, bool]:
+    ) -> Tuple[List[Union[float, bool]], List[float], List[float]]:
         """
         Query calibrated auditor for certificate for a particular group
         
@@ -178,7 +178,9 @@ class Auditor:
 
         Returns
         -------
-        certificate : Tuple[List[Union[float, bool]], List[float]]
+        certificate : List[Union[float, bool]]
+        value : List[float]
+        threshold : List[float]
         """
         if self.critical_values is None:
             raise ValueError("Run calibrate before querying for groups.")
@@ -304,6 +306,7 @@ class Auditor:
             else:
                 self.student_threshold = 1
                 K_basis = None
+
             self.critical_values.append(
                 estimate_critical_value(
                     "RKHS", 
@@ -351,7 +354,7 @@ class Auditor:
         alpha : float,
         epsilon : float = 0,
         bootstrap_params : dict = {"student" : "mad", "student_threshold" : -np.inf}  
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         if self.metric.requires_conditioning():
             groups_list = self.metric.get_conditional_groups(
                 groups,
