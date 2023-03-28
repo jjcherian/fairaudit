@@ -3,23 +3,6 @@
 This package enables fairness auditing of arbitrary black-box models
 given access to a hold-out set.
 
-For an estimator of the mean of a normally-distributed random vector $y$ with known covariance matrix $\sigma^2 I$ given by
-
-$$
-    \hat\mu(y) = \mathcal A ~ \text{argmin} \frac{1}{2} \lVert\mathcal A b - y\rVert_2^2 + r(b)
-$$
-
-where $r: \mathbb R^p \to \mathbb R$  is a convex function and
-$\mathcal A: \mathbb R^p \to \mathbb R^d$ is a linear operator, this package
-provides methods to compute Stein's Unbiased  Risk Estimate of $\hat\mu$:
-
-$$
-    SURE(\hat\mu, y) = -n \sigma^2 + \lVert\hat\mu(y) - y\rVert_2^2 + 2 \sigma^2 \nabla \cdot \hat\mu(y).
-$$
-
-$SURE(\hat\mu, y)$ is a good estimate of the $\ell_2$ risk of $\hat\mu$, especially
-for high dimensional problems.
-
 ## Installation
 
 fairaudit can be installed with pip.
