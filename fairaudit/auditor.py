@@ -5,8 +5,8 @@ from sklearn.metrics.pairwise import pairwise_kernels
 from statsmodels.stats import multitest
 from typing import List, Tuple, Union
 
-from bootstrap import estimate_bootstrap_distribution, estimate_critical_value
-from metrics import Metric
+from fairaudit.bootstrap import estimate_bootstrap_distribution, estimate_critical_value
+from fairaudit.metrics import Metric
 
 
 class Auditor:

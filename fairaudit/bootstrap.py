@@ -1,9 +1,9 @@
 import numpy as np
 import scipy.stats
 
-from groups import score_intervals
-from shifts import score_rkhs, score_rkhs_nonneg
-from metrics import Metric
+from fairaudit.groups import score_intervals
+from fairaudit.shifts import score_rkhs, score_rkhs_nonneg
+from fairaudit.metrics import Metric
 
 from tqdm import tqdm
 from typing import Tuple
