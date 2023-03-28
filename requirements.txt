@@ -2,3 +2,7 @@ numpy
 scipy
 matplotlib
 seaborn
+cvxpy
+tqdm
+sklearn
+statsmodels
