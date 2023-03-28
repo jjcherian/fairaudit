@@ -5,7 +5,7 @@ given access to a hold-out set.
 
 ## Installation
 
-fairaudit can be installed with pip.
+fairaudit can be installed (locally for now) with pip.
 
 To install with pip:
 
