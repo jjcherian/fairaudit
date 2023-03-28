@@ -4,5 +4,5 @@ matplotlib
 seaborn
 cvxpy
 tqdm
-sklearn
+scikit-learn
 statsmodels

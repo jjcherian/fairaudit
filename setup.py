@@ -27,7 +27,7 @@ setup(
         "numpy",
         "scipy",
         "cvxpy",
-	"sklearn",
+	"scikit-learn",
 	"matplotlib",
 	"statsmodels",
 	"tqdm"
