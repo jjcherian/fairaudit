@@ -15,10 +15,9 @@ $ pip install .
 
 ## Examples
 
-The easiest way to start using fairaudit may be to read the notebooks:
+The easiest way to start using fairaudit may be to go through the following notebook:
 
  * [COMPAS](https://github.com/jjcherian/fairaudit/blob/main/notebooks/compas.ipynb)
- * [Folktables](https://github.com/jjcherian/fairaudit/blob/main/notebooks/folktables.ipynb)
 
 
 ## Usage
