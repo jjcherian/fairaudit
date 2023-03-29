@@ -64,9 +64,6 @@ def run_cqr_trial(audit_trail, boot_params, disc, alpha=0.05):
         metric=Metric('equalized_coverage')
     )
 
-    import IPython
-    IPython.embed()
-
     intervals_at = get_rectangles(audit_trail['x'].to_numpy().reshape(-1,1), {0:discretization})
 
     
