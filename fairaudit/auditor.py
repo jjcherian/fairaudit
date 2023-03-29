@@ -63,10 +63,26 @@ class Auditor:
         Parameters
         ----------
         alpha : float
+            Type I error threshold
         type : str
-        groups : Groups
+            Takes one of three values ('lower', 'upper', 'interval').
+            See epsilon documentation for what these correpsond to.
+        groups : Union[np.ndarray, str]
+            Either a string for a supported collection of groups or a numpy array
+            likely obtained by calling `get_intersections` or `get_rectangles` from group.py
+            Array dimensions should be (n_points, n_groups)
         epsilon : float = None
-        bootstrap_params : dict = None
+            epsilon = None calibrates for issuing confidence bounds. 
+                type = "upper" issues lower confidence bounds, 
+                type = "lower" issues upper confidence bounds, and 
+                "interval" issues confidence intervals.
+            If a non-null value is passed in, we issue a Boolean certificate. 
+                type = "upper" tests the null that epsilon(G) >= epsilon
+                type = "lower" tests the null that epsilon(G) <= epsilon
+                type = "interval" tests the null that |epsilon(G)| <= epsilon
+        bootstrap_params : dict = {}
+            Allows the user to specify a random seed, number of bootstrap resamples,
+            and studentization parameters for the bootstrapping process.
         """
         if isinstance(groups, str):
             if epsilon == None:
@@ -275,6 +291,28 @@ class Auditor:
         kernel_params : dict = {},
         bootstrap_params : dict = {}
     ) -> None:
+        """
+        Obtain bootstrap critical value for a specified RKHS.
+
+        Parameters
+        ----------
+        alpha : float
+            Type I error threshold
+        type : str
+            Takes one of three values ('lower', 'upper', 'interval').
+                type = "upper" issues lower confidence bounds, 
+                type = "lower" issues upper confidence bounds, 
+                type = "interval" issues confidence intervals.
+        kernel : str
+            Name of scikit-learn kernel the user would like to use. 
+            Suggested kernels: 'rbf' 'laplacian' 'sigmoid'
+        kenrnel_params : dict = {}
+            Additional parameters required to specify the kernel, 
+            e.g. {'gamma': 1} for RBF kernel
+        bootstrap_params : dict = {}
+            Allows the user to specify a random seed, number of bootstrap resamples,
+            and studentization parameters for the bootstrap process.
+        """
         vacuous_group = np.ones((len(self.L), 1), dtype=bool)
         if self.metric.requires_conditioning():
             self.groups_list = self.metric.get_conditional_groups(
@@ -321,6 +359,19 @@ class Auditor:
         self,
         weights : np.ndarray,
     ) -> Tuple[List[float], List[float]]:
+        """
+        Query calibrated auditor for certificate for a particular RKHS
+        function.
+        
+        Parameters
+        ----------
+        weights : np.ndarray
+
+        Returns
+        -------
+        certificate : List[float]
+        value : List[float]
+        """
         bounds = []
         vals = []
         for K, crit_value, group_dummies in zip(self.K, self.critical_values, self.groups_list):

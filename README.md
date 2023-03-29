@@ -7,10 +7,10 @@ given access to a hold-out set.
 
 fairaudit can be installed (locally for now) with pip.
 
-To install with pip:
+To install with pip, navigate to the directory for this repo and
 
 ```bash
-$ pip install fairaudit
+$ pip install . 
 ```
 
 ## Examples
@@ -21,181 +21,259 @@ The easiest way to start using fairaudit may be to read the notebooks:
  * [Folktables](https://github.com/jjcherian/fairaudit/blob/main/notebooks/folktables.ipynb)
 
 
-<!-- ## Usage
+## Usage
 
-There are three key things in this package:
+### The `Auditor` Class
 
- * The `SURE` class
- * The `Solver` class and its subclasses `CVXPYSolver`, `FISTASolver`, and `ADMMSolver`
- * The `prox_lib` helper library
-
-### The `SURE` Class
-
-The `SURE` class has the following API:
+The `Auditor` class has the following API:
 ```python
-class SURE:
-    def __init__(self, variance: float, solver: Solver): ...
+class Auditor:
+    def __init__(self, x: np.ndarray, y: np.ndarray, z: np.ndarray, metric: fairaudit.Metric): ...
 
-    def compute(self, y: torch.Tensor, divergence_parameters={}) -> float:
+    def calibrate_groups(
+        self, 
+        alpha : float,
+        type : str,
+        groups : Union[np.ndarray, str],
+        epsilon : float = None,
+        bootstrap_params : dict = {}
+    ) -> None:
         """
-        Computes and returns SURE for the estimator computed by the solver
-        at the point y.
+        Obtain bootstrap critical values for a specific group collection.
 
-        Currently, divergence_parameters can contain the key "m" to indicate
-        how many samples to use during the divergence estimation (which
-        dominates the runtime at high dimensions). The default is for m to be
-        102.
-
-        In the future we may switch to A-Hutch++ and may change what options
-        the divergence_parameters specifies.
+        Parameters
+        ----------
+        alpha : float
+            Type I error threshold
+        type : str
+            Takes one of three values ('lower', 'upper', 'interval').
+            See epsilon documentation for what these correpsond to.
+        groups : Union[np.ndarray, str]
+            Either a string for a supported collection of groups or a numpy array
+            likely obtained by calling `get_intersections` or `get_rectangles` from group.py
+            Array dimensions should be (n_points, n_groups)
+        epsilon : float = None
+            epsilon = None calibrates for issuing confidence bounds. 
+                type = "upper" issues lower confidence bounds, 
+                type = "lower" issues upper confidence bounds, 
+                type = "interval" issues confidence intervals.
+            If a non-null value is passed in, we issue a Boolean certificate. 
+                type = "upper" tests the null that epsilon(G) >= epsilon
+                type = "lower" tests the null that epsilon(G) <= epsilon
+                type = "interval" tests the null that |epsilon(G)| >= epsilon
+        bootstrap_params : dict = {}
+            Allows the user to specify a random seed, number of bootstrap resamples,
+            and studentization parameters for the bootstrap process.
         """
 
-    @property
-    def solution(self) -> torch.Tensor:
+    def query_group(self, group : Union[np.ndarray, int]) -> 
+    Tuple[List[Union[float, bool]], List[float], List[float]]:
         """
-        Returns solver.solve(y) from the last compute call.
+        Query calibrated auditor for certificate for a particular group
+        
+        Parameters
+        ----------
+        group : Union[np.ndarray, int]
+            Will accept index into groups originally passed in or Boolean 
+            array if calibrated collection was infinite
+
+        Returns
+        -------
+        certificate : List[Union[float, bool]]
+            Boolean certificates or confidence bounds for each metric audited
+        value : List[float]
+            Empirical value of epsilon(G) for each metric audited
+        threshold : List[float]
+            Estimate of theta for each metric audited
         """
 
-    def runtimes(self) -> TypedDict('Runtimes', solver=float, divergence=float):
+    def calibrate_rkhs(
+        self,
+        alpha : float,
+        type : str,
+        kernel : str,
+        kernel_params : dict = {},
+        bootstrap_params : dict = {}
+    ) -> None:
         """
-        Returns how long it took for the solver to run and how long it took
-        the divergence estimator to run during the last compute call.
+        Obtain bootstrap critical value for a specified RKHS.
+
+        Parameters
+        ----------
+        alpha : float
+            Type I error threshold
+        type : str
+            Takes one of three values ('lower', 'upper', 'interval').
+                type = "upper" issues lower confidence bounds, 
+                type = "lower" issues upper confidence bounds, 
+                type = "interval" issues confidence intervals.
+        kernel : str
+            Name of scikit-learn kernel the user would like to use. 
+            Suggested kernels: 'rbf' 'laplacian' 'sigmoid'
+        kenrnel_params : dict = {}
+            Additional parameters required to specify the kernel, 
+            e.g. {'gamma': 1} for RBF kernel
+        bootstrap_params : dict = {}
+            Allows the user to specify a random seed, number of bootstrap resamples,
+            and studentization parameters for the bootstrap process.
+        """
+
+    def query_rkhs(self, weights : np.ndarray) -> Tuple[List[float], List[float]]:
+        """
+        Query calibrated auditor for certificate for a particular RKHS
+        function.
+        
+        Parameters
+        ----------
+        weights : np.ndarray
+            RHKS function weights, i.e. f(x_i) = (Kw)_i
+        Returns
+        -------
+        certificate : List[float]
+            Confidence bounds for each metric queried.
+        value : List[float]
+            Empirical value of epsilon(G) for each metric queried.
+        """
+
+    def flag_groups(
+        self,
+        groups : np.ndarray,
+        type : str,
+        alpha : float,
+        epsilon : float = 0,
+        bootstrap_params : dict = {"student" : "mad", "student_threshold" : -np.inf}  
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Returns flags and estimates of epsilon(G) for each group in some finite 
+        collection. 
+
+        Parameters
+        ----------
+        groups : np.ndarray
+            Boolean numpy array of dimension (n_points, n_groups)
+        type : str
+            Takes values ('upper', 'lower', 'interval')
+            'upper' tests the null, epsilon(G) >= epsilon
+            'lower' tests the null, epsilon(G) <= epsilon
+            'interval' tests the null, |epsilon(G)| <= epsilon
+        alpha : float
+            FDR level
+        epsilon : float = 0
+            See 'type' documentation
+        bootstrap_params : dict = {"student" : "mad", "student_threshold" : -np.inf} 
+            Allows the user to specify a random seed, number of bootstrap resamples,
+            and studentization parameters for the bootstrap process.
+        
+        Returns
+        -------
+        flags : List[bool]
+            One flag is raised for each group - at least one metric must be flagged for the group
+            to receive a True flag.
+        values : List[float]
+            Empirical value of epsilon(G) for each metric queried.
         """
 ```
 
 
-### The `Solver` class
+### The `Metric` class
 
-Most uses of the library should use one of the existing `Solver` subclasses.
-They have the following APIs:
+The Metric object should be instantiated for any performance metrics the auditor 
+may be interested in querying. Its methods are never directly queried by the user, 
+but its constructor should be usable.
 
-The three notable `Solver` instances provided by this library have the following
-constructors:
 ```python
-class FISTASolver(Solver):
-    def __init__(self, A: linops.LinearOperator,
-                       prox_R: Callable[[torch.Tensor, float | torch.Tensor], torch.Tensor],
-                       x0: torch.Tensor,
-                       device=None,
-                       lipschitz_iterations=20,
-                       lipschitz_vec=None,
-                       *, max_iters=5000, eps=1e-3):
+class Metric:
+    def __init__(
+        self, 
+        name : str, 
+        evaluation_function : Callable[[np.ndarray, np.ndarray], np.ndarray] = None,
+        threshold_function : Callable[[np.ndarray, np.ndarray], float] = None,
+        metric_params : dict = {}
+    ) -> None:
         """
-        This solver solves problems of the form with a variant on FISTA:
-              min. 1/2 ||A b - y||_2^2 + r(b)
-        and estimates the mean of y with A b^* where b^* is the optimal b.
+        Constructs the Metric object used by the Auditor object to recompute performance
+        over bootstrap samples.
 
-        A is a linear operator defined using <https://github.com/cvxgrp/torch_linops>
+        Parameters
+        ----------
+        name : str
+        evaluation_function : Callable[[np.ndarray, np.ndarray], np.ndarray] = None
+            Function applied to model predictions (Z) and true labels (Y) that returns 
+            an array of metric values, e.g. the evaluation_function for 
+            mean squared error is lambda z, y: return (z - y)**2
+        threshold_function : Callable[[np.ndarray, np.ndarray], float]
+            Function applied to model predictions (Z) and true labels (Y) that returns 
+            a single threshold for comparison, e.g. when comparing to the population average, 
+            the threshold_function for MSE is lambda z, y: return np.mean((z - y)**2)
+        metric_params : dict = {}
+            Additional parameters may be required for metrics that require separate error
+            tracking depending on the predicted value or true label.
 
-        prox_R is a differentiable-with-respect-to-its-first-argument function to
-            find the optimal point b for a (v, t) pair of
-              min. t r(b) + 1/2 ||b - v||_2^2
+            For 'calibration'-type metrics, the key 'calibration_bins' should map to a list
+            that determines how the predicted values (Z) should be digitized/binned
 
-        x0 is the point where we begin iterations, it must be chosen
-            indepentently of y.
-
-        lipschitz_iterations is how many iterations of the power method to use
-        to approximate the largest eigenvalue of A^T A
-
-        lipschitz_vec is the vector to start the power method. By default, a
-        vector of all 1s is used. If this vector is orthogonal to the largest
-        eigenvector of A^T A, this argument is mandatory.
-
-        max_iters, eps control when iterations stop.
-
-        """
-
-class ADMMSolver(Solver):
-    def __init__(self, A: linops.LinearOperator,
-                       prox_R: Callable[[torch.Tensor, float | torch.Tensor], torch.Tensor],
-                       x0: torch.Tensor,
-                       device=None,
-                       *, max_iters=1000, eps_rel=1e-3, eps_abs=1e-6):
-        """
-        This solver solves problems of the form with a variant on ADMM:
-              min. 1/2 ||A b - y||_2^2 + r(b)
-        and estimates the mean of y with A b^* where b^* is the optimal b.
-
-        A is a linear operator defined using <https://github.com/cvxgrp/torch_linops>
-
-        prox_R is a differentiable-with-respect-to-its-first-argument function to
-            find the optimal point b for a (v, t) pair of
-              min. t r(b) + 1/2 ||b - v||_2^2
-
-        x0 is the point where we begin iterations, it must be chosen
-            indepentently of y.
-
-        max_iters, eps_rel, eps_abs control when iterations stop.
-        """
-
-class CVXPYSolver(Solver):
-    def __init__(self, problem: cp.Problem,
-                       y_parameter: cp.Parameter, 
-                       variables: list[cp.Variable], 
-                       estimate: Callable[[list[torch.Tensor]], torch.Tensor]):
-        """
-        problem must be a CVXPY problem with a single paremeter, y_parameter,
-            and variables y_variable.
-
-        estimate must be function which takes tensors with values for each variable
-            and returns the estimate.
-
-        WARNING: This solver has poor performance on large problems, and can
-        have undetected poor accuracy on some moderately-sized problems.
+            For 'equalized odds'-type metrics, the key 'y_values' should map to a list
+            so that the metric is calculated separately for each value of y in that list
         """
 ```
 
-If you wish to implement, `Solver`, it has has the following API, where `T` is
-any type of the implementation's choice:
+
+### The `groups` module
+We provide two methods in the `groups` module for constructing collections of groups
+that can be audited.
+
 ```python
-class Solver:
+def get_intersections(
+    X : np.ndarray, 
+    discretization : dict = {},
+    depth : int = None
+) -> np.ndarray:
+    """
+    Construct groups formed by intersections of other attributes.
+    
+    Parameters
+    ----------
+    X : np.ndarray
+    discretization : dict = {}
+        Keys index columns of X
+        Values specify input to the "bins" argument of np.digitize(...)
+    depth : int = None
+        If None, we consider all intersections, otherwise
+        we all consider intersections of up to specified depth.
+    Returns
+    ---------
+    groups : np.ndarray
+        Boolean numpy array of size (n_points, n_groups)
+    """
 
-    def solve(self, y: torch.Tensor) -> T:
-        """
-        Returns intermediate value used to estimate the mean of the distribution
-        y is sampled from.
-        """
+def get_rectangles(X : np.ndarray, discretization : dict = {}) -> np.ndarray:
+    """
+    Construct rectangles formed by attributes.
 
-    def estimate(self, beta: T) -> torch.Tensor: ...
-        """
-        Given the output of a solve call, returns the estimate of the mean of the
-        distribution y was sampled from.
-        """
+    Parameters
+    ----------
+
+    discretization : dict 
+        Keys index columns of X
+        Values specify input to the "bins" argument of np.digitize(...)
+
+    Returns
+    ---------
+    groups : np.ndarray
+        Boolean numpy array of size (n_points, n_groups)
+    """
 ```
-
-Note that for a given instance `s` of a solver class, `s.estimate(s.solve(y))` must
-be differentiable via torch's backpropagation.
-
-
-### The `prox_lib` library
-Since `FISTASolver` and `ADMMSolver` both require a proximal operator for the
-regularizer we provide some methods here to help construct proximal operators:
-
-There are also many helper methods in `surecr.prox_lib`.
-
- * `prox_l1_norm(v, t)`: the $\ell_1$ norm's proximal operator.
- * `prox_l2_norm(v, t)`: the $\ell_2$ norm's proximal operator.
- * `make_scaled_prox_nuc_norm(shape: tuple[int, int], t_scale: float)`: generates the proximal operator
-    $\text{prox}_{r}: \mathbb R^{\mathtt{shape}} \to \mathbb R^{\mathtt{shape}}$
-    of 
-    $b \mapsto \mathtt{t_scale} \sum_i \sigma_i(b)$
- * `combine_proxs(shape: list[int], proxs: list)`: if there are two regularizers
-    $r_1$, $r_2$ such that the regularizer for the problem is given by
-    $r(b, b') = r_1(b) + r_2(b')$, then this function should be called with
-    `([dim(b), dim(b')], [prox_r_1, prox_r_2])`.
- * `scale_prox(prox, t_scale)`: takes a proximal operator of $r$, and returns the
-    proximal operator of $\mathtt{t_scale} r$. -->
 
 
 # Citing
-If you use this code in a research project, please cite the associated paper. 
-<!-- ```
-@article{nobel2022tractable,
-    title={Tractable evalutaion of {S}tein's {U}nbiased {R}isk {E}stimate with convex regularizers},
-    author={Parth Nobel \and Emmanuel Cand\`es \and Stephen Boyd},
+If you use this code in a research project, please cite the forthcoming paper. 
+```
+@article{cherian2023statistical,
+    title={Statistical inference for fairness auditing},
+    author={John Cherian \and Emmanuel Cand\`es},
     publisher = {arXiv},
-    year = {2022},
-    note = {arXiv:2211.05947 [math.ST]},
-    url = {https://arxiv.org/abs/2211.05947},
+    year = {2023},
+    note = {arXiv:XXXX.XXXX [stat.ME]},
+    url = {https://arxiv.org/abs/XXXX.XXXXX},
 }
-``` -->
+``` 

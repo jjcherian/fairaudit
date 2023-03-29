@@ -15,11 +15,16 @@ def get_intersections(
     Parameters
     ----------
     X : np.ndarray
-    Y : np.ndarray
-    Z : np.ndarray
-    discretization : dict
-    depth : int
-    metric : function
+    discretization : dict = {}
+        Keys index columns of X
+        Values specify input to the "bins" argument of np.digitize(...)
+    depth : int = None
+        If None, we consider all intersections, otherwise
+        we all consider intersections of up to specified depth.
+    Returns
+    ---------
+    groups : np.ndarray
+        Boolean numpy array of size (n_points, n_groups)
     """
     for idx, disc in discretization.items():
         X[:,idx] = np.digitize(
@@ -56,10 +61,13 @@ def get_rectangles(
     ----------
 
     discretization : dict 
-        Discretize feature into chunks of relative size 
-        determined by the discretization parameter, i.e.,
-        [1,2,3,4,5] with discretization < .2 yields
-        [1], [2], [3], [4], [5]
+        Keys index columns of X
+        Values specify input to the "bins" argument of np.digitize(...)
+
+    Returns
+    ---------
+    groups : np.ndarray
+        Boolean numpy array of size (n_points, n_groups)
     """
     X = copy.deepcopy(X)
     for idx, disc in discretization.items():

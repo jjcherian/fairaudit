@@ -58,6 +58,26 @@ class Metric:
         threshold_function : Callable[[np.ndarray, np.ndarray], float] = None,
         metric_params : dict = {}
     ):
+        """
+        Constructs the Metric object used by the Auditor object to recompute performance
+        over bootstrap samples.
+
+        Parameters
+        ----------
+        name : str
+        evaluation_function : Callable[[np.ndarray, np.ndarray], np.ndarray] = None
+            Function applied to model predictions and true labels that returns an array of
+            metric values, e.g. the evaluation_function for mean squared error is
+            lambda z, y: return (z - y)**2
+        threshold_function : Callable[[np.ndarray, np.ndarray], float]
+            Function applied to model predictions and true labels that returns a single
+            threshold for comparison, e.g. when comparing to the population average, 
+            the threshold_function for MSE is lambda z, y: return np.mean((z - y)**2)
+        metric_params : dict = {}
+            Additional parameters may be required for metrics that compute different errors
+            depending on the predicted value or true label, 
+            e.g. "equalized odds" in fairness or calibration error
+        """
         self.metric_name = name
         if name in ('predictive_equality'):
             metric_params['y_values'] = [0]
