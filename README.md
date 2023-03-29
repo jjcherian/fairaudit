@@ -27,7 +27,12 @@ The easiest way to start using fairaudit may be to go through the following note
 The `Auditor` class has the following API:
 ```python
 class Auditor:
-    def __init__(self, x: np.ndarray, y: np.ndarray, z: np.ndarray, metric: fairaudit.Metric): ...
+    def __init__(
+	self, 
+	x: np.ndarray, 
+	y: np.ndarray, 
+	z: np.ndarray, 
+	metric: fairaudit.Metric): ...
 
     def calibrate_groups(
         self, 
@@ -49,7 +54,8 @@ class Auditor:
             See epsilon documentation for what these correpsond to.
         groups : Union[np.ndarray, str]
             Either a string for a supported collection of groups or a numpy array
-            likely obtained by calling `get_intersections` or `get_rectangles` from group.py
+            likely obtained by calling `get_intersections` or `get_rectangles` 
+            from group.py
             Array dimensions should be (n_points, n_groups)
         epsilon : float = None
             epsilon = None calibrates for issuing confidence bounds. 
