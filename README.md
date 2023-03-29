@@ -166,8 +166,8 @@ class Auditor:
         Returns
         -------
         flags : List[bool]
-            One flag is raised for each group - at least one metric must be flagged for the group
-            to receive a True flag.
+            One flag is raised for each group - at least one metric must be flagged 
+	    for the group to receive a True flag.
         values : List[float]
             Empirical value of epsilon(G) for each metric queried.
         """
