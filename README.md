@@ -3,7 +3,7 @@
 `fairaudit` is a Python package for fairness auditing with statisical guarantees.
 
 Given a hold-out set $\{(x_i, y_i)}_{i = 1}^n$, a model $f(\cdot)$,
-and a collection of groups $\mathcal{G}$, ``fairaudit'' issues
+and a collection of groups $\mathcal{G}$, `fairaudit` issues
 simultaneously valid guarantees on group-wise performance and discovers
 groups with disparate performance for an arbitrary metric, $\ell(f(x), y)$.
 
