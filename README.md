@@ -1,7 +1,20 @@
 # fairaudit
 
-This package enables fairness auditing of arbitrary black-box models
-given access to a hold-out set.
+`fairaudit` is a Python package for fairness auditing with statisical guarantees.
+
+Given a hold-out set $$\{(x_i, y_i)}_{i = 1}^n$$, a model $$f(\cdot)$$,
+and a collection of groups $$\mathcal{G}$$, ``fairaudit'' issues
+simultaneously valid guarantees on group-wise performance and discovers
+groups with disparate performance for an arbitrary metric, $$\ell(f(x), y)$$.
+
+Formally, let
+
+$$\epsilon(G) := \mathbb{E}_P[\ell(f(X), Y) \mid (X, Y) \in G] - \theta_P$$.
+
+Then, the **certification** task corresponds to issuing a simultaneously valid confidence set
+(can be an upper bound, lower bound, or interval) for $$\epsilon(G)$$, while the
+**flagging** task corresponds to discovering $$G$$ for which $$\epsilon(G)$$ fails to meet 
+some tolerance threshold. The latter discoveries satisfy an asymptotic FDR guarantee.
 
 ## Installation
 
