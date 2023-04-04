@@ -9,7 +9,7 @@ groups with disparate performance for an arbitrary metric, $\ell(f(x), y)$.
 
 Formally, let
 
-$$\epsilon(G) := \mathbb{E}_P[\ell(f(X), Y) \mid (X, Y) \in G] - \theta_P$$.
+$$\epsilon(G) := \mathbb{E}_P[\ell(f(X), Y) \mid (X, Y) \in G] - \theta_P.$$
 
 Then, the **certification** task corresponds to issuing a simultaneously valid confidence set
 (can be an upper bound, lower bound, or interval) for $\epsilon(G)$, while the
