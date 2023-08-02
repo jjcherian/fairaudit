@@ -14,6 +14,7 @@ BOOTSTRAP_DEFAULTS = {
     "student": None,
     "student_threshold": None,
     "prob_threshold": 1e-10,
+    "w_0": 1,
     "seed": 1
 }
 
@@ -201,7 +202,7 @@ def get_rescaling(
 
         sigma_G = np.sqrt(L_cond_var) + group_probs * (threshold_var - 2 * L_threshold_cond_cov)
 
-        w_0 = 1
+        w_0 = bootstrap_params.get("w_0", BOOTSTRAP_DEFAULTS["w_0"])
         weight = group_probs / (group_probs + w_0)
         rescaling *= weight * sigma_G + (1 - weight) * np.sqrt(L_var)
     return rescaling
