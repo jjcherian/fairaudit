@@ -291,7 +291,7 @@ If you use this code in a research project, please cite the forthcoming paper.
     author={John Cherian \and Emmanuel Cand\`es},
     publisher = {arXiv},
     year = {2023},
-    note = {arXiv:XXXX.XXXX [stat.ME]},
-    url = {https://arxiv.org/abs/XXXX.XXXXX},
+    note = {arXiv:2305.03712 [stat.ME]},
+    url = {https://arxiv.org/abs/2305.03712},
 }
 ``` 
