@@ -18,12 +18,10 @@ some tolerance threshold. The latter discoveries satisfy an asymptotic FDR guara
 
 ## Installation
 
-fairaudit can be installed (locally for now) with pip.
-
-To install with pip, navigate to the directory for this repo and
+fairaudit can be installed with pip.
 
 ```bash
-$ pip install . 
+$ pip install fairaudit
 ```
 
 ## Examples
