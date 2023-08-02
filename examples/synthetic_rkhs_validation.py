@@ -2,8 +2,7 @@ import numpy as np
 import pandas as pd
 import pickle
 
-from auditor import Auditor
-from metrics import Metric
+from fairaudit import Auditor, Metric
 
 from tqdm import tqdm
 from sklearn.metrics.pairwise import pairwise_kernels
@@ -11,8 +10,8 @@ from sklearn.metrics.pairwise import pairwise_kernels
 def eval_mse(Z, Y):
     return (Z - Y)**2
 
-def mean_mse(Z, Y):
-    return np.mean((Z - Y)**2)
+def mean_mse(Z, Y, X):
+    return (Z - Y)**2
 
 def run_trial_constant(sample_size, kernel_params, boot_params, alpha):
 

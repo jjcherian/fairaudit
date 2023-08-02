@@ -91,6 +91,7 @@ def _compute_fixed_statistic(
     return stats, group_mat[:,2]
 
 def estimate_bootstrap_distribution(
+    X : np.ndarray,
     Y : np.ndarray,
     Z : np.ndarray,
     L : np.ndarray,
@@ -112,7 +113,7 @@ def estimate_bootstrap_distribution(
     rng = np.random.default_rng(
         seed=bootstrap_params.get("seed", BOOTSTRAP_DEFAULTS["seed"])
     )
-    for b in tqdm(range(B)):
+    for b in range(B): #tqdm(range(B)):
         if method == 'multinomial':
             w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1,1)
         elif method == 'gaussian':
@@ -147,7 +148,7 @@ def estimate_bootstrap_distribution(
         student_threshold = bootstrap_params.get("student_threshold", BOOTSTRAP_DEFAULTS["student_threshold"])
         prob_threshold = bootstrap_params.get("prob_threshold", BOOTSTRAP_DEFAULTS["prob_threshold"])
         std_devs = studentize(b_statistics, group_probs, studentization, student_threshold, prob_threshold)
-        b_statistics /= std_devs
+        # b_statistics /= std_devs
 
     return b_statistics, std_devs
 
@@ -173,6 +174,38 @@ def studentize(
         raise ValueError(f"Unsupported studentization method: {student}.")
     return studentization.clip(student_threshold)
 
+def get_rescaling(
+    X : np.ndarray,
+    Y : np.ndarray,
+    Z : np.ndarray,
+    metric : Metric,
+    g_dummies : np.ndarray,
+    bootstrap_params : dict = {}
+):
+    method = bootstrap_params.get("student", BOOTSTRAP_DEFAULTS["student"])
+    prob_threshold = bootstrap_params.get("prob_threshold", BOOTSTRAP_DEFAULTS["prob_threshold"])
+
+    if method is None:
+        rescaling = np.ones((g_dummies.shape[1],))
+    else:
+        exp = 3/2 if method == "prob_bound" else 1/2
+
+        group_probs = np.mean(g_dummies, axis=0)
+        rescaling = group_probs.clip(prob_threshold)
+        rescaling = rescaling**(exp)
+
+        L_var = metric.compute_metric_variance(Z, Y)
+        L_cond_var = metric.compute_metric_variance(Z, Y, g_dummies)
+        threshold_var = metric.compute_threshold_variance(Z, Y, X)
+        L_threshold_cond_cov = metric.compute_metric_threshold_covariance(Z, Y, X, g_dummies)
+
+        sigma_G = np.sqrt(L_cond_var) + group_probs * (threshold_var - 2 * L_threshold_cond_cov)
+
+        w_0 = 1
+        weight = group_probs / (group_probs + w_0)
+        rescaling *= weight * sigma_G + (1 - weight) * np.sqrt(L_var)
+    return rescaling
+
 def estimate_critical_value(
     function_class : str,
     alpha : float,
@@ -188,7 +221,7 @@ def estimate_critical_value(
 
     n = len(L)
     scores = []
-    for _ in tqdm(range(B)): # removed tqdm for now
+    for _ in range(B): #tqdm(range(B)): # removed tqdm for now
         if method == 'multinomial':
             w = rng.multinomial(n, [1/n] * n, size=1).reshape(-1)
         elif method == 'gaussian':
@@ -225,8 +258,6 @@ def estimate_critical_value(
             raise ValueError(f"Invalid function class {function_class}.")
         scores.append(score)
 
-    if function_class == "RKHS":
-        alpha = alpha/2
     if kwargs["type"] == "lower":
         qtile = np.quantile(scores, alpha)
     elif kwargs["type"] == "upper":

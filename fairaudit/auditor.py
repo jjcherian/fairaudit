@@ -5,7 +5,7 @@ from sklearn.metrics.pairwise import pairwise_kernels
 from statsmodels.stats import multitest
 from typing import List, Tuple, Union
 
-from fairaudit.bootstrap import estimate_bootstrap_distribution, estimate_critical_value
+from fairaudit.bootstrap import estimate_bootstrap_distribution, estimate_critical_value, get_rescaling
 from fairaudit.metrics import Metric
 
 
@@ -130,8 +130,10 @@ class Auditor:
                 )
                 students = np.asarray([1])
             else:
+                s_hat = get_rescaling(self.X, self.Y, self.Z, self.metric, g_dummies, bootstrap_params)
                 if type == "interval" and epsilon is not None:
                     b_statistics_l, students = estimate_bootstrap_distribution(
+                        self.X,
                         self.Y,
                         self.Z,
                         self.L,
@@ -141,7 +143,11 @@ class Auditor:
                         epsilon,
                         bootstrap_params
                     )
+
+                    b_statistics_l /= s_hat
+
                     b_statistics_u, students = estimate_bootstrap_distribution(
+                        self.X,
                         self.Y,
                         self.Z,
                         self.L,
@@ -151,6 +157,9 @@ class Auditor:
                         -1 * epsilon,
                         bootstrap_params
                     )
+
+                    b_statistics_u /= s_hat
+
                     c_value_l = _compute_critical_value(
                         b_statistics_l,
                         alpha,
@@ -164,6 +173,7 @@ class Auditor:
                     c_value = (c_value_l, c_value_u)
                 else:
                     b_statistics, students = estimate_bootstrap_distribution(
+                        self.X,
                         self.Y,
                         self.Z,
                         self.L,
@@ -173,13 +183,14 @@ class Auditor:
                         epsilon,
                         bootstrap_params
                     )
+                    b_statistics /= s_hat
                     c_value = _compute_critical_value(
                         b_statistics,
                         alpha,
                         type
                     )
             self.critical_values.append(c_value)
-            self.students.append(students)
+            self.students.append(s_hat)
 
     def query_group(
         self,
@@ -425,6 +436,7 @@ class Auditor:
                 self.Y[all_dummies]
             )
             _, s_grps = estimate_bootstrap_distribution(
+                self.X,
                 self.Y,
                 self.Z,
                 self.L,

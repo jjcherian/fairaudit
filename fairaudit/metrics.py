@@ -1,23 +1,23 @@
 import numpy as np
 
-from typing import Callable
+from typing import Callable, Union
 
-def zero(Z, Y):
-    return 0
+def zero(Z, Y, X):
+    return np.zeros_like(Y)
 
-def mean_predict(Z, Y):
-    return np.mean(Z)
+def mean_predict(Z, Y, X):
+    return Z
 
-def mean_positive(Z, Y):
-    return np.mean(np.isclose(Z[np.isclose(Y, 1)], 0))
+def mean_positive(Z, Y, X):
+    return np.isclose(Z[np.isclose(Y, 1)], 0)
 
-def mean_negative(Z, Y):
-    return np.mean(np.isclose(Z[np.isclose(Y, 0)], 1))
+def mean_negative(Z, Y, X):
+    return np.isclose(Z[np.isclose(Y, 0)], 1)
 
 def mean_coverage(Z, Y):
     upper_cover = Z[:,1] >= Y.flatten()
     lower_cover = Z[:,0] <= Y.flatten()
-    return np.mean(upper_cover & lower_cover)
+    return upper_cover & lower_cover
 
 def error_rate(Z, Y):
     return ~np.isclose(Z, Y)
@@ -101,9 +101,56 @@ class Metric:
     def compute_threshold(
         self,
         Z : np.ndarray,
-        Y : np.ndarray
+        Y : np.ndarray,
+        X : np.ndarray = None
     ) -> np.float32:
-        return _THRESHOLDS[self.metric_name](Z, Y)
+        return np.mean(_THRESHOLDS[self.metric_name](Z, Y, X))
+    
+    def compute_threshold_variance(
+        self,
+        Z : np.ndarray,
+        Y : np.ndarray,
+        X : np.ndarray = None
+    ) -> np.float32:
+        threshold_vals = _THRESHOLDS[self.metric_name](Z, Y, X)
+        return np.var(threshold_vals)
+    
+    def compute_metric_variance(
+        self,
+        Z : np.ndarray,
+        Y : np.ndarray,
+        group_dummies : np.ndarray = None
+    ) -> Union[np.float32, np.ndarray]:
+        L = self.evaluate(Z, Y).reshape(-1,1)
+        if group_dummies is None:
+            return np.var(L)
+        group_L = (group_dummies * L)
+        group_prob = np.mean(group_dummies, axis=0)
+
+        group_means = np.mean(group_L, axis=0) * (1/group_prob)
+        group_deviations = group_dummies * (group_L - group_means)
+
+        return np.mean(group_deviations**2, axis=0) * (1/group_prob)
+    
+    def compute_metric_threshold_covariance(
+        self,
+        Z : np.ndarray,
+        Y : np.ndarray,
+        X : np.ndarray = None,
+        group_dummies : np.ndarray = None
+    ) -> Union[np.float32, np.ndarray]:
+        threshold_vals = _THRESHOLDS[self.metric_name](Z, Y, X)
+        L = self.evaluate(Z, Y).reshape(-1,1)
+        if group_dummies is None:
+            return np.cov(L, threshold_vals)
+        else:
+            group_L = (group_dummies * L)
+            group_threshold = (group_dummies * threshold_vals.reshape(-1,1))
+            group_prob = np.sum(group_dummies, axis=0)
+
+            term_1 = np.mean(group_L * group_threshold, axis=0) * (1/group_prob)
+            term_2 = np.mean(group_L, axis=0) * np.mean(group_threshold, axis=0) * (1/group_prob**2)
+            return term_1 - term_2
 
     def requires_conditioning(self) -> bool:
         return 'calibration_bins' in self.metric_params or 'y_values' in self.metric_params

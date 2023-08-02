@@ -4,15 +4,14 @@ import pandas as pd
 import pickle
 import scipy.stats
 
-from auditor import Auditor
-from groups import get_rectangles
-from metrics import Metric
+from fairaudit import Auditor, Metric
+from fairaudit.groups import get_rectangles
 
 from tqdm import tqdm
 
-with open('ground_truth.pkl', 'rb') as fp:
+with open('../data/ground_truth.pkl', 'rb') as fp:
     coverages_gt = pickle.load(fp)
-audit_trail = pd.read_csv('../../oos_data.csv', index_col=0)
+audit_trail = pd.read_csv('../data/oos_data.csv', index_col=0)
 
 def run_trial(size, seed, disc, alpha=0.05):
     rng = np.random.default_rng(seed=seed)
@@ -176,8 +175,8 @@ def cartesian_product(*arrays):
 def eval_mse(Z, Y):
     return (Z - Y)**2
 
-def mean_mse(Z, Y):
-    return np.mean((Z - Y)**2)
+def threshold_mse(Z, Y, X):
+    return (Z - Y)**2
 
 
 def run_trial_boolean_ols(sample_size, boot_params, eps, alpha):
@@ -196,7 +195,7 @@ def run_trial_boolean_ols(sample_size, boot_params, eps, alpha):
     Y = rng.normal(loc=(X @ theta_0).flatten(), scale=np.sqrt(eps)).flatten()
     Z = (X @ theta_hat).flatten()
 
-    metric = Metric("mse", eval_mse, lambda x, y: 0)
+    metric = Metric("mse", eval_mse, lambda x, y, z: np.zeros_like(y))
 
     auditor = Auditor(
         X=X,
@@ -235,15 +234,15 @@ def run_trial_boolean_olsh(sample_size, boot_params, eps, alpha):
 
     theta_0 = rng.standard_normal((d,1))
     x_train = rng.uniform(0, 1, size=(n_train,d))
-    y_train = rng.normal(loc=(x_train @ theta_0).flatten(), scale=np.sqrt(x_train.flatten())).flatten()
+    y_train = (x_train @ theta_0).flatten() + np.sqrt(x_train.flatten()) * rng.normal(size=(n_train,)).flatten()
 
     theta_hat, _, _, _ = np.linalg.lstsq(x_train, y_train, rcond=None)
 
     X = rng.uniform(0, 1, size=(sample_size,d))
-    Y = rng.normal(loc=(X @ theta_0).flatten(), scale=np.sqrt(X.flatten())).flatten()
+    Y = (X @ theta_0).flatten() + np.sqrt(X.flatten()) * rng.normal(size=(sample_size,)).flatten()
     Z = (X @ theta_hat).flatten()
 
-    metric = Metric("mse", eval_mse, lambda x, y: 0)
+    metric = Metric("mse", eval_mse, threshold_mse)#lambda x, y, z: np.zeros_like(y))
 
     auditor = Auditor(
         X=X,
@@ -304,15 +303,19 @@ def run_trial_olsh(sample_size, boot_params, alpha):
 
     theta_0 = rng.standard_normal((d,1))
     x_train = rng.uniform(0, 1, size=(n_train,d))
-    y_train = rng.normal(loc=(x_train @ theta_0).flatten(), scale=np.sqrt(x_train.flatten())).flatten()
+    y_train = (x_train @ theta_0).flatten() + np.sqrt(x_train.flatten()) * rng.normal(size=(n_train,)).flatten()
+    # y_train = (x_train @ theta_0).flatten() + np.sqrt(x_train.flatten()) * rng.standard_t(df=3, size=(n_train,)).flatten()
+
 
     theta_hat, _, _, _ = np.linalg.lstsq(x_train, y_train, rcond=None)
 
     X = rng.uniform(0, 1, size=(sample_size,d))
-    Y = rng.normal(loc=(X @ theta_0).flatten(), scale=np.sqrt(X.flatten())).flatten()
+    Y = (X @ theta_0).flatten() + np.sqrt(X.flatten()) * rng.normal(size=(sample_size,)).flatten()
+    # Y = (X @ theta_0).flatten() + np.sqrt(X.flatten()) * rng.standard_t(df=3, size=(sample_size,)).flatten()
+
     Z = (X @ theta_hat).flatten()
 
-    metric = Metric("mse", eval_mse, lambda x, y: 0)
+    metric = Metric("mse", eval_mse, lambda x, y, z: np.zeros_like(y))
 
     auditor = Auditor(
         X=X,
@@ -332,11 +335,14 @@ def run_trial_olsh(sample_size, boot_params, alpha):
         bootstrap_params=boot_params 
     )
 
-    if boot_params['seed'] == 3:
-        import IPython
-        IPython.embed()
+    # if boot_params['seed'] == 3:
+    #     import IPython
+    #     IPython.embed()
 
     fwer = True
+    max_val = np.max(discretization) + disc
+    min_val = np.min(discretization)
+    true_threshold = 0# (max_val + min_val) / 2 + (theta_hat - theta_0)**2  * (max_val**2 + min_val**2 + min_val * max_val)/3
     numer_5, denom_5 = (0,0)
     numer_4, denom_4 = (0,0)
     for min_val in discretization:
@@ -345,6 +351,7 @@ def run_trial_olsh(sample_size, boot_params, alpha):
                 continue
                 
             true_eps = (max_val + min_val) / 2 + (theta_hat - theta_0)**2  * (max_val**2 + min_val**2 + min_val * max_val)/3
+            true_eps -= true_threshold
             interval_dummies = (X <= max_val) & (X >= min_val)
 
             if interval_dummies.any() == False:
@@ -447,10 +454,10 @@ for sample_size in args.sample_size:
             prob_threshold = (25 / sample_size)
             if args.epsilon is None:
                 boot_params = {'seed': i, 'B': 500, 'method': 'multinomial',
-                               'student': 'prob_bound', 'student_threshold': prob_threshold**(3/2)}
+                               'student': 'prob_bound', 'student_threshold': prob_threshold**(3/2), 'prob_threshold': prob_threshold}
             else:
                 boot_params = {'seed': i, 'B': 500, 'method': 'multinomial',
-                               'student': 'prob_bool', 'student_threshold': prob_threshold**(1/2)}
+                               'student': 'prob_bool', 'student_threshold': prob_threshold**(1/2), 'prob_threshold': prob_threshold}
         else:     
             boot_params = {'seed': i, 'B': 500, 'method': 'multinomial'}
 
